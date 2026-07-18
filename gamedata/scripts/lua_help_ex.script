@@ -545,6 +545,7 @@
         function memory_remove_links(game_object)
         function get_object_visible_distance(game_object)
         function get_object_luminocity(game_object)
+        void make_enemy_visible(game_object enemy) // Force-plant enemy as a VISIBLE-memory object on this stalker (CMemoryManager::make_object_visible_somewhen - the engine's own squad wounded-target distribution call). Enemy selection scores "currently seen" far above hit/sound memory, so a shooter injected only via hit memory never wins selection; this puts him in the seen class where the engine's nearest-seen logic takes over. Visibility then decays through normal memory rules. Stalker receiver, alive-entity argument, no-op with an error log otherwise.
 
         // Artefact
         function get_artefact_additional_inventory_weight()
