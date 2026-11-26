@@ -75,6 +75,12 @@ dxPixEventWrapper::dxPixEventWrapper(LPCWSTR wszName, u32 color) : annotation(nu
 #ifdef USE_DX11
     gpu_profiler::event_begin(wszName); // GPU time per scope for the performance overlay (neXt-Ray)
 #endif
+#ifdef USE_DX12
+    // The DX12 wrapper's context takes the markers itself (neXt-Ray, as before the 2026 merge)
+    if (HW.pAnnotation)
+        HW.pAnnotation->BeginEvent(wszName);
+    (void)color;
+#else
     ID3DUserDefinedAnnotation* const listener = HW.pAnnotation;
     if (!listener)
         return;
@@ -91,7 +97,7 @@ dxPixEventWrapper::dxPixEventWrapper(LPCWSTR wszName, u32 color) : annotation(nu
 
     if (listener->BeginEvent(wszName) >= 0)
         annotation = listener;
-
+#endif
 }
 
 dxPixEventWrapper::~dxPixEventWrapper()
@@ -99,10 +105,15 @@ dxPixEventWrapper::~dxPixEventWrapper()
 #ifdef USE_DX11
     gpu_profiler::event_end();
 #endif
+#ifdef USE_DX12
+    if (HW.pAnnotation)
+        HW.pAnnotation->EndEvent();
+#else
     if (perf_event)
         dx10_perf().end();
     else if (annotation)
         annotation->EndEvent();
+#endif
 }
 
 extern Fvector4 ps_dev_param_1;
