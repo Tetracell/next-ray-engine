@@ -37,6 +37,8 @@ XRSOUND_API extern float psSoundVFactor;
 XRSOUND_API extern float psSoundVMusic;
 XRSOUND_API extern float psSoundVMusicFactor;
 XRSOUND_API extern float psSoundRolloff;
+XRSOUND_API extern float psSoundMaxDistanceMultiplier;
+XRSOUND_API extern float psSoundMaxAIDistanceMultiplier;
 XRSOUND_API extern float psSoundOcclusionScale;
 XRSOUND_API extern Flags32 psSoundFlags;
 XRSOUND_API extern int psSoundTargets;
@@ -507,8 +509,7 @@ IC void ref_sound::play_no_feedback(CObject* O, u32 flags, float d, Fvector* pos
 IC void ref_sound::set_position(const Fvector& pos)
 {
 	VERIFY(!::Sound->i_locked());
-	VERIFY(_feedback());
-	_feedback()->set_position(pos);
+	if (_feedback()) _feedback()->set_position(pos);
 }
 
 IC void ref_sound::set_frequency(float freq)

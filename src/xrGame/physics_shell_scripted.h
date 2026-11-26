@@ -19,8 +19,12 @@ public:
 
 	void applyForce(float x, float y, float z) { physics_impl().applyForce(x, y, z); }
 
+	// island exact-integration opt-in (see CPHIsland::Step)
+	void setForceExactIntegration() { physics_impl().SetForceExactIntegration(); }
+
 	// demonized: applyTorque
 	void applyTorque(float x, float y, float z) { physics_impl().applyTorque(x, y, z); }
+	void applyRelTorque(float x, float y, float z) { physics_impl().applyRelTorque(x, y, z); }
 
 	cphysics_element_scripted* get_Element(LPCSTR bone_name);
 	cphysics_element_scripted* get_Element(u16 bone_id);
@@ -43,7 +47,12 @@ public:
 	void set_LinearVel(Fvector& velocity) { physics_impl().set_LinearVel(velocity); }
 	void get_AngularVel(Fvector& velocity) const { physics_impl().get_AngularVel(velocity); }
 	void set_AngularVel(Fvector& velocity) { physics_impl().set_AngularVel(velocity); }
+    void set_DynamicLimits(float l, float w) { physics_impl().set_DynamicLimits(l, w); }
 	void freeze();
 	void unfreeze();
+	void SetScale(Fvector scale);
+    void SetScale(float scale) { SetScale(Fvector().set(scale, scale, scale)); }
+	Fvector GetScale();
+	float GetMass();
 DECLARE_SCRIPT_REGISTER_FUNCTION
 };

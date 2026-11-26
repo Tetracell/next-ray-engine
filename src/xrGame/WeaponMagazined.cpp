@@ -152,7 +152,8 @@ void CWeaponMagazined::Load(LPCSTR section)
 	m_sSndShotCurrent = IsSilencerAttached() ? "sndSilencerShot" : "sndShot";
 
 	//звуки и партиклы глушителя, еслит такой есть
-	if (m_eSilencerStatus == ALife::eAddonAttachable || m_eSilencerStatus == ALife::eAddonPermanent)
+	if (m_eSilencerStatus == ALife::eAddonAttachable || m_eSilencerStatus == ALife::eAddonPermanent ||
+		!m_bUseEngineAttachments)
 	{
 		if (pSettings->line_exist(section, "silencer_flame_particles"))
 			m_sSilencerFlameParticles = pSettings->r_string(section, "silencer_flame_particles");
@@ -206,6 +207,8 @@ void CWeaponMagazined::Load(LPCSTR section)
 	LoadScopeKoeffs();
 
 	empty_click_layer = READ_IF_EXISTS(pSettings, r_string, *hud_sect, "empty_click_anm", nullptr);
+
+	m_bUseStrictReloadMark = READ_IF_EXISTS(pSettings, r_bool, section, "use_strict_reload_mark", false);
 
 	if (empty_click_layer)
 	{
@@ -924,7 +927,7 @@ void CWeaponMagazined::OnShot()
 #ifdef EXTENDED_WEAPON_CALLBACKS
 	CGameObject* object = smart_cast<CGameObject*>(H_Parent());
 	if (object)
-		object->callback(GameObject::eOnWeaponFired)(object->lua_game_object(), this->lua_game_object(), iAmmoElapsed);
+		object->callback(GameObject::eOnWeaponFired)(object->lua_game_object(), this->lua_game_object(), iAmmoElapsed, 0, *m_ammoTypes[m_ammoType], 0);
 #endif
 
 	// Эффект сдвига (отдача)
@@ -1529,6 +1532,9 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
 extern int scope_2dtexactive; //crookr
 void CWeaponMagazined::InitAddons()
 {
+	if (!m_bUseEngineAttachments)
+		return;
+
 	if (IsScopeAttached())
 	{
 		shared_str scope_tex_name;
@@ -1768,14 +1774,15 @@ void CWeaponMagazined::PlayAnimShoot()
 	}
 }
 
-void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M)
+void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M, float mark_start, float mark_end)
 {
-	inherited::OnMotionMark(state, M);
+	inherited::OnMotionMark(state, M, mark_start, mark_end);
 
     // Edited by Verdatim 18.4.2026
-	if (state == eReload)
+    shared_str reloadMarkName = READ_IF_EXISTS(pSettings, r_string, cNameSect(), "motion_mark_reload", "");
+	if (state == eReload && (reloadMarkName.size() == 0 || reloadMarkName == M.name))
 	{
-		if (bClearJamOnly)
+		if (bClearJamOnly && (!m_bUseStrictReloadMark || xr_strcmp(M.name.c_str(), "clear_jam") == 0))
 		{
 			bMisfire = false;
 			bClearJamOnly = false;
@@ -1799,7 +1806,7 @@ void CWeaponMagazined::OnMotionMark(u32 state, const motion_marks& M)
 		}
 		else
 		{
-			if (m_needReload)
+			if (m_needReload && (!m_bUseStrictReloadMark || xr_strcmp(M.name.c_str(), "reload") == 0))
 				ReloadMagazine();
 
             // Verdatim, fix for lmg with non-(lmg_reload) motion marks causing belts to disappear
@@ -2102,7 +2109,8 @@ bool CWeaponMagazined::install_upgrade_impl(LPCSTR section, bool test)
 	}
 	result |= result2;
 
-	if (m_eSilencerStatus == ALife::eAddonAttachable || m_eSilencerStatus == ALife::eAddonPermanent)
+	if (m_eSilencerStatus == ALife::eAddonAttachable || m_eSilencerStatus == ALife::eAddonPermanent ||
+		!m_bUseEngineAttachments)
 	{
 		result |= process_if_exists_set(section, "silencer_flame_particles", &CInifile::r_string,
 		                                m_sSilencerFlameParticles, test);
@@ -2152,6 +2160,126 @@ bool CWeaponMagazined::install_upgrade_impl(LPCSTR section, bool test)
 	result |= result2;
 
 	UpdateUIScope();
+
+    result2 = process_if_exists_set(section, "fire_point", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                vLoadedFirePoint[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid fire_point count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
+
+    result2 = process_if_exists_set(section, "fire_point2", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                vLoadedFirePoint2[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid fire_point2 count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
+
+    result2 = process_if_exists_set(section, "fire_point_silencer", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                vLoadedFirePointSilencer[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid fire_point_silencer count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
+
+    result2 = process_if_exists_set(section, "hud_fire_point", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                HudItemData()->m_measures.m_fire_point_offset[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid hud_fire_point count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
+
+    result2 = process_if_exists_set(section, "hud_fire_point2", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                HudItemData()->m_measures.m_fire_point2_offset[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid hud_fire_point2 count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
+
+    result2 = process_if_exists_set(section, "hud_fire_point_silencer", &CInifile::r_string, str, test);
+    if (result2 && !test)
+    {
+        int pointsCount = _GetItemCount(str);
+        if (pointsCount == 3)
+        {
+            for (int i = 0; i < pointsCount; ++i)
+            {
+                string16 sItem;
+                _GetItem(str, i, sItem);
+                HudItemData()->m_measures.m_fire_point_silencer[i] = std::atof(sItem);
+            }
+        }
+        else
+        {
+            Msg("! CWeaponMagazined::install_upgrade_impl ERROR: Invalid hud_fire_point_silencer count in section [%s], expected 3, got %d", section, pointsCount);
+        }
+    }
+    result |= result2;
 
 	return result;
 }

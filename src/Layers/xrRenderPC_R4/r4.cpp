@@ -18,6 +18,7 @@
 #include "../xrRender/ShaderResourceTraits.h"
 
 #include "../../xrCore/profiler.h"
+#include "../../xrCore/ShaderSourceCRC.h"
 
 #include "D3DX10Core.h"
 #include "r4_upscaler.h"
@@ -1214,7 +1215,7 @@ IRenderVisual* CRender::model_CreateParticles(LPCSTR name)
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_PrefetchOne(LPCSTR name, bool assert) { Models->Prefetch_One(name, assert); }
 void CRender::models_Clear(BOOL b_complete) { Models->ClearPool(b_complete); }
-bool CRender::models_Exists(LPCSTR name) { return Models->Exists(name); }
+bool CRender::models_Exists(LPCSTR name, bool no_prefetch) { return Models->Exists(name, no_prefetch); }
 
 ref_shader CRender::getShader(int id)
 {
@@ -1832,6 +1833,7 @@ HRESULT CRender::shader_compile(
 	char c_ssr_quality[32];
 	char c_rain_quality[32];
 	char c_inter_grass[32];
+	char c_shader_bus[32];
 
 	char sh_name[MAX_PATH] = "";
 
@@ -2522,6 +2524,14 @@ HRESULT CRender::shader_compile(
 		++len;
 	}
 
+	// the bus version, in the cache name too so each version keeps its own build
+	xr_sprintf(c_shader_bus, "%d", ShaderBus::version());
+	defines[def_it].Name = "SHADER_BUS";
+	defines[def_it].Definition = c_shader_bus;
+	def_it++;
+	xr_strcat(sh_name, c_shader_bus);
+	len += xr_strlen(c_shader_bus);
+
 	sh_name[len] = 0;
 	{
 		string_path cached;
@@ -2596,7 +2606,9 @@ HRESULT CRender::shader_compile(
 	FS.file_list(file_set, folder_name, FS_ListFiles | FS_RootOnly, "*");
 
 	string_path temp_file_name, file_name;
-	if (psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, file_set, temp_file_name))
+	bool const useGeneratedShaderCache =
+		psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, file_set, temp_file_name);
+	if (useGeneratedShaderCache)
 	{
 		string_path file;
 		xr_strcpy(file, "shaders_cache\\r4\\");
@@ -2614,6 +2626,10 @@ HRESULT CRender::shader_compile(
 		xr_strcat(file_name, temp_file_name);
 	}
 
+	u32 source_crc = 0;
+	if (useGeneratedShaderCache)
+		source_crc = getShaderSourceCrc32(pSrcData, SrcDataLen, ::Render->getShaderPath());
+
 	// Pre-compilation: the cache file only, S_FALSE when compiled
 	if (shader_precompile::t_ahead)
 	{
@@ -2625,6 +2641,9 @@ HRESULT CRender::shader_compile(
 		if (SUCCEEDED(_result))
 		{
 			IWriter* file = FS.w_open(file_name);
+			// The same layout as below (upstream's source CRC first in a generated cache file)
+			if (useGeneratedShaderCache)
+				file->w_u32(source_crc);
 			file->w_u32(crc32(code->GetBufferPointer(), code->GetBufferSize()));
 			file->w(code->GetBufferPointer(), (u32)code->GetBufferSize());
 			FS.w_close(file);
@@ -2650,10 +2669,31 @@ HRESULT CRender::shader_compile(
 	{
 		PROF_EVENT("shader_compile: from the cache");
 		IReader* file = FS.r_open(file_name);
-		if (file->length() > 4)
+		if (useGeneratedShaderCache)
 		{
-			u32 crc = 0;
-			crc = file->r_u32();
+			if (file->length() > 8)
+			{
+				u32 const saved_source_crc = file->r_u32();
+				if (saved_source_crc == source_crc)
+				{
+					u32 const crc = file->r_u32();
+					u32 const real_crc = crc32(file->pointer(), file->elapsed());
+
+					if (real_crc == crc)
+					{
+						_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm);
+					}
+				}
+				else
+				{
+					Msg("~Shader cache source CRC mismatch for '%s': cached=0x%08x current=0x%08x, recompiling",
+						name, saved_source_crc, source_crc);
+				}
+			}
+		}
+		else if (file->length() > 4)
+		{
+			u32 const crc = file->r_u32();
 
 			u32 const real_crc = crc32(file->pointer(), file->elapsed());
 
@@ -2692,6 +2732,9 @@ HRESULT CRender::shader_compile(
 			IWriter* file = FS.w_open(file_name);
 
 			u32 const crc = crc32(pShaderBuf->GetBufferPointer(), pShaderBuf->GetBufferSize());
+
+			if (useGeneratedShaderCache)
+				file->w_u32(source_crc);
 
 			file->w_u32(crc);
 			file->w(pShaderBuf->GetBufferPointer(), (u32)pShaderBuf->GetBufferSize());

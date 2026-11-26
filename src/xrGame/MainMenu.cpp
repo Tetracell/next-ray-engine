@@ -3,6 +3,7 @@
 #include "gamepad.h"
 #include "UI/UIDialogWnd.h"
 #include "ui/UIMessageBoxEx.h"
+#include "UI3dStatic.h"
 #include "../xrEngine/xr_IOConsole.h"
 #include "../xrEngine/IGame_Level.h"
 #include "../xrEngine/CameraManager.h"
@@ -419,6 +420,12 @@ bool CMainMenu::OnRenderPPUI_query()
 	return IsActive() && !m_Flags.test(flGameSaveScreenshot) && b_shniaganeed_pp;
 }
 
+CUIDialogWnd* CMainMenu::ModalOverStartDialog()
+{
+	CUIDialogWnd* tir = TopInputReceiver();
+	return (tir && tir != m_startDialog) ? tir : NULL;
+}
+
 
 extern void draw_wnds_rects();
 extern bool use_reshade;
@@ -435,15 +442,25 @@ void CMainMenu::OnRender()
 	if (use_reshade)
 		render_reshade_effects();
 
+	const bool render_pp_ui = OnRenderPPUI_query();
+	if (render_pp_ui)
+    CUI3dStatic::PrepareAtlas();
 	Render->Render();
 
-	if (!OnRenderPPUI_query())
+	if (!render_pp_ui)
 	{
+		CUI3dStatic::PrepareAtlas();
 		DoRenderDialogs();
 		gamepad_render_ui(true);
-		UI().RenderFont();
-		draw_wnds_rects();
 	}
+	else if (CUIDialogWnd* modal = ModalOverStartDialog())
+	{
+		if (modal->IsShown())
+			modal->Draw();
+	}
+
+	UI().RenderFont();
+	draw_wnds_rects();
 }
 
 void CMainMenu::OnRenderPPUI_main()
@@ -460,7 +477,7 @@ void CMainMenu::OnRenderPPUI_main()
 
 	if (OnRenderPPUI_query())
 	{
-		DoRenderDialogs();
+		DoRenderDialogs(ModalOverStartDialog());
 		gamepad_render_ui(true);
 		UI().RenderFont();
 	}

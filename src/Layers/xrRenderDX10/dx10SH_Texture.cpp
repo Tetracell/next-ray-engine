@@ -3,12 +3,15 @@
 
 #include "../xrRender/ResourceManager.h"
 
+void fix_texture_name(LPSTR fn);
+
 #ifndef _EDITOR
 #include "../../xrEngine/render.h"
 #endif
 
 #include "../../xrEngine/tntQAVI.h"
 #include "../../xrEngine/xrTheora_Surface.h"
+#include "../xrRender/gifPlayer.h"
 
 #include "../xrRender/dxRenderDeviceRender.h"
 
@@ -224,6 +227,13 @@ void CTexture::stream_drop()
 }
 #endif
 
+// Background PPL task group used to (re)load textures off the calling thread.
+// Defined in dx10ResourceManager_Resources.cpp; CResourceManager::_CreateTexture
+// dispatches brand-new textures' initial Load() through it whenever the device is
+// ready. apply_load() below reuses the same queue for evicted textures instead of
+// calling Load() inline.
+extern xr_task_group textures_load_tasks;
+
 void resptrcode_texture::create(LPCSTR _name)
 {
 	PROF_EVENT("resptrcode_texture::create");
@@ -240,7 +250,9 @@ CTexture::CTexture()
 	m_pSRView = NULL;
 	pAVI = NULL;
 	pTheora = NULL;
+    gifPlayer = nullptr;
 	desc_cache = 0;
+	ZeroMemory(&desc, sizeof(desc));
 	seqMSPF = 0;
 	flags.MemoryUsage = 0;
 	flags.bLoaded = false;
@@ -268,6 +280,9 @@ void CTexture::surface_set(ID3DBaseTexture* surf)
 		while (flags.bLoading)
 			SwitchToThread();
 	}
+
+	if (cName.size() && strstr(cName.c_str(), "$user$"))
+		flags.bUser = true;
 	if (surf) surf->AddRef();
 	_RELEASE(pSurface);
 	_RELEASE(m_pSRView);
@@ -357,14 +372,54 @@ void CTexture::PostLoad()
 	if (pTheora) bind = xr_make_delegate(this, &CTexture::apply_theora);
 	else if (pAVI) bind = xr_make_delegate(this, &CTexture::apply_avi);
 	else if (!seqDATA.empty()) bind = xr_make_delegate(this, &CTexture::apply_seq);
+	else if (gifPlayer) bind = xr_make_delegate(this, &CTexture::apply_gif);
 	else bind = xr_make_delegate(this, &CTexture::apply_normal);
 }
 
 void CTexture::apply_load(u32 dwStage)
 {
-	if (!flags.bLoaded) Load();
-	else PostLoad();
-	bind(dwStage);
+    if (!flags.bLoaded)
+    {
+        // Never loaded, or just dropped by EvictStalledTextures(). Load() ends up in
+        // D3DX11CreateTextureFromMemory, which races the resource thread if run inline
+        // here (this can run on the render thread mid-gameplay just as easily as on a
+        // loading-screen thread during level load - neither is safe in the MT build).
+        // Queue the (re)load the same way _CreateTexture() does for new textures instead;
+        // bLoading guards against re-queuing every call while that's in flight.
+        if (!flags.bLoading)
+        {
+#ifdef DEBUG
+            Msg("* [TexReload] queued: %s", cName.c_str());
+#endif // DEBUG
+            CTexture* self = this;
+            static DWORD this_thread_id = 0;
+            this_thread_id = GetCurrentThreadId();
+            textures_load_tasks.run([self]()
+            {
+                if (this_thread_id != GetCurrentThreadId()) { PROF_THREAD("X-Ray PPL Thread") }
+                self->Load();
+            });
+        }
+        // Bind nothing (or whatever is already there, e.g. mid-flight from an
+        // in-flight Load()) for this call. apply_normal() waits out any in-flight
+        // load, so this never touches D3D resources that are being created
+        // concurrently. Once the queued Load() completes, PostLoad() re-points
+        // `bind` at the real apply_* handler and subsequent calls stop landing here.
+        apply_normal(dwStage);
+        return;
+    }
+
+    PostLoad();
+    if (bind == xr_make_delegate(this, &CTexture::apply_load))
+    {
+        // This should not happen - if bind is still apply_load, fall back to apply_normal
+        // which will just apply the (potentially unloaded) surface
+        apply_normal(dwStage);
+    }
+    else
+    {
+        bind(dwStage);
+    }
 };
 
 void CTexture::ProcessStaging()
@@ -466,6 +521,8 @@ void CTexture::Apply(u32 dwStage)
 		while (flags.bLoading)
 			SwitchToThread();
 	}
+	dwLastUsedFrame = RDEVICE.dwFrame;
+
 	if (flags.bLoadedAsStaging)
 		ProcessStaging();
 #ifdef USE_DX11
@@ -624,6 +681,23 @@ void CTexture::apply_seq(u32 dwStage)
 	//CHK_DX(HW.pDevice->SetTexture(dwStage,pSurface));
 	Apply(dwStage);
 };
+
+void CTexture::apply_gif(u32 dwStage)
+{
+	while (flags.bLoading)
+	{
+		SwitchToThread();
+	}
+	if (gifPlayer->UpdateFrame())
+	{
+        const CGIFAnimationPlayer::Frame* const gifFrame = gifPlayer->GetActiveFrame();
+        R_ASSERT(gifFrame);
+
+        pSurface = gifFrame->surface;
+        m_pSRView = gifFrame->srv;
+	}
+	Apply(dwStage);
+}
 
 void CTexture::apply_normal(u32 dwStage)
 {
@@ -800,12 +874,35 @@ void CTexture::Load()
 		u32 fps = atoi(buffer);
 		seqMSPF = 1000 / fps;
 
+		// Resolved name of each seqDATA entry. A frame file that repeats is loaded once:
+		// later entries share its surface and view, each holding its own reference, so
+		// Unload() still releases every entry once. MemoryUsage counts it once.
+		xr_vector<shared_str> seq_names;
 		while (!_fs->eof())
 		{
 			_fs->r_string(buffer, sizeof(buffer));
 			_Trim(buffer);
 			if (buffer[0])
 			{
+				string_path resolved;
+				xr_strcpy(resolved, buffer);
+				fix_texture_name(resolved);
+				xr_strlwr(resolved);
+				const shared_str name = resolved;
+
+				const auto it = std::find(seq_names.begin(), seq_names.end(), name);
+				if (it != seq_names.end())
+				{
+					const size_t first = it - seq_names.begin();
+					seqDATA.push_back(seqDATA[first]);
+					seqDATA.back()->AddRef();
+					m_seqSRView.push_back(m_seqSRView[first]);
+					if (m_seqSRView.back())
+						m_seqSRView.back()->AddRef();
+					seq_names.push_back(name);
+					continue;
+				}
+
 				// Load another texture
 				u32 mem = 0;
 				pSurface = ::RImplementation.texture_load(buffer, mem);
@@ -819,12 +916,33 @@ void CTexture::Load()
 					m_seqSRView.push_back(0);
 					HW.pDevice->CreateShaderResourceView(seqDATA.back(), NULL, &m_seqSRView.back());
 					flags.MemoryUsage += mem;
+					seq_names.push_back(name);
 				}
 			}
 		}
 		pSurface = 0;
 		FS.r_close(_fs);
 	}
+    else if (FS.exist(fn, "$game_textures$", *cName, ".gif"))
+    {
+        gifPlayer = xr_new<CGIFAnimationPlayer>();
+        if (!gifPlayer->Load(fn))
+        {
+            xr_delete(gifPlayer);
+            pSurface = nullptr;
+            m_pSRView = nullptr;
+        }
+        else
+        {
+            flags.MemoryUsage = gifPlayer->GetUsedMemory();
+
+            gifPlayer->Play();
+
+            const CGIFAnimationPlayer::Frame* const gifFrame = gifPlayer->GetActiveFrame();
+            pSurface = gifFrame->surface;
+            m_pSRView = gifFrame->srv;
+        }
+    }
 	else
 	{
 		// Normal texture
@@ -902,6 +1020,13 @@ void CTexture::Unload()
 		pSurface = 0;
 		m_pSRView = 0;
 	}
+
+    if (gifPlayer)
+    {
+        xr_delete(gifPlayer);
+        pSurface = nullptr;
+        m_pSRView = nullptr;
+    }
 
 #ifdef DEBUG
 	_SHOW_REF		(msg_buff, pSurface);

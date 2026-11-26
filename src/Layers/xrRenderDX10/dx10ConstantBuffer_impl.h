@@ -52,10 +52,14 @@ IC void dx10ConstantBuffer::set(R_constant* C, R_constant_load& L, const Fmatrix
 IC void dx10ConstantBuffer::set(R_constant* C, R_constant_load& L, const Fvector4& A)
 {
 	VERIFY(RC_float == C->type);
-	VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls);
+	VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls || RC_1x1 == L.cls);
+	//Fvector4*	it	= Access(L.index);
+	//it->set	(A);
 
 	u32 count = 4;
-	if (L.cls == RC_1x2)
+	if (L.cls == RC_1x1)
+		count = 1;
+	else if (L.cls == RC_1x2)
 		count = 2;
 	else if (L.cls == RC_1x3)
 		count = 3;
@@ -90,6 +94,15 @@ IC void dx10ConstantBuffer::seta(R_constant* C, R_constant_load& L, u32 e, const
 	VERIFY(RC_float == C->type);
 	VERIFY(RC_1x4 == L.cls || RC_1x3 == L.cls || RC_1x2 == L.cls);
 	Write((u32)L.index + lineSize * e, &A, lineSize);
+}
+
+IC void dx10ConstantBuffer::set_bytes(R_constant_load& L, const void* data, u32 bytes)
+{
+	VERIFY((u32)L.index + L.size <= m_uiBufferSize);
+	BYTE* it = (BYTE*)Access(L.index);
+	const u32 copied = _min(bytes, L.size);
+	CopyMemory(it, data, copied);
+	ZeroMemory(it + copied, L.size - copied);
 }
 
 IC void* dx10ConstantBuffer::AccessDirect(R_constant_load& L, u32 DataSize)

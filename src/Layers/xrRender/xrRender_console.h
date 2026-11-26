@@ -100,6 +100,7 @@ extern ECORE_API float r__upscaler_mip_bias; // added to ps_r__tf_Mipbias while 
 enum
 {
 	RFLAG_NO_RAM_TEXTURES = (1 << 0),
+	RFLAG_HOM_DYNAMIC = (1 << 1),
 };
 
 extern ECORE_API Flags32 ps_r__common_flags;
@@ -197,6 +198,7 @@ extern ECORE_API float ps_r2_ss_sunshafts_radius;
 extern u32 ps_sunshafts_mode;
 
 extern ECORE_API float hud_fov_aim_factor;
+extern ECORE_API int interpolation_based_scope_zoom;
 
 //--DSR-- SilencerOverheat_start
 extern ECORE_API float sil_glow_max_temp;
@@ -219,6 +221,8 @@ extern ECORE_API float ps_r2_tnmp_w; // r2-only
 extern ECORE_API float ps_r2_tnmp_exposure; // r2-only
 extern ECORE_API float ps_r2_tnmp_gamma; // r2-only
 extern ECORE_API float ps_r2_tnmp_onoff; // r2-only
+
+extern ECORE_API float ps_r4_full_detail_distance_scale; // r4-only
 
 /* --- HDR10 parameters --- */
 extern ECORE_API float ps_r4_hdr10_whitepoint_nits; // r4-only
@@ -292,6 +296,11 @@ extern ECORE_API float ps_r2_img_exposure; // r2-only
 extern ECORE_API float ps_r2_img_gamma; // r2-only
 extern ECORE_API float ps_r2_img_saturation; // r2-only
 extern ECORE_API Fvector ps_r2_img_cg; // r2-only
+extern ECORE_API float ps_r4_atlas_resolution; // r4-only
+extern ECORE_API int ps_r4_atlas;
+extern ECORE_API int ps_r4_atlas_width;
+extern ECORE_API int ps_r4_atlas_height;
+extern ECORE_API u32 ps_r4_atlas_msaa;
 
 ////
 
@@ -401,6 +410,12 @@ enum
 
 // demonized:
 extern ECORE_API BOOL occq_debug;
+
+// Texture eviction system
+extern ECORE_API int ps_r__tex_evict_enabled;
+extern ECORE_API int ps_r__tex_evict_age_frames;
+extern ECORE_API int ps_r__tex_evict_batch_size;
+extern ECORE_API int ps_r__tex_evict_interval;
 
 extern void xrRender_initconsole();
 extern BOOL xrRender_test_hw();

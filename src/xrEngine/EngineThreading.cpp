@@ -12,6 +12,7 @@
 
 BOOL mt_Scheduler = TRUE;
 extern BOOL mt_calc_bones_parallel;
+BOOL mt_SchedulerRT = FALSE;
 
 void XRay::Engine::PreRenderThread()
 {
@@ -174,8 +175,15 @@ void XRay::Engine::GameThread()
 		{
 			PROF_EVENT("Sheduler Deferred");
 			mt_timed t(mt_t_scheduler);
-			::Engine.Sheduler.UpdateDeferred();
-			::Engine.Sheduler.UpdateFinalize();
+            if (mt_SchedulerRT)
+            {
+                ::Engine.Sheduler.Update();
+            }
+            else
+            {
+                ::Engine.Sheduler.UpdateDeferred();
+                ::Engine.Sheduler.UpdateFinalize();
+            }
 		}
 	}
 
@@ -185,6 +193,13 @@ void XRay::Engine::GameThread()
 		for (u32 pit = 0; pit < Device.seqParallel.size(); pit++)
 			Device.seqParallel[pit]();
 		Device.seqParallel.clear();
+	}
+
+	// Physics contact callbacks in seqFrameMT can enter Lua. Do before GC
+	{
+		PROF_EVENT("seqFrameMT");
+		mt_timed t(mt_t_frame_mt);
+		Device.seqFrameMT.Process(rp_Frame);
 	}
 
     // demonized: While Renderer prepares frame and GPU renders it, use time opportunity to repeatedly call Lua GC with small step value
@@ -207,10 +222,4 @@ void XRay::Engine::GameThread()
     };
     if (psLua_ParallelGC && Device.LuaGC)
         Device.secondary_tasks.run(LuaGC);
-
-	{
-		PROF_EVENT("seqFrameMT");
-		mt_timed t(mt_t_frame_mt);
-		Device.seqFrameMT.Process(rp_Frame);
-	}
 }

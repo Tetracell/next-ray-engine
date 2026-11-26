@@ -75,11 +75,21 @@ using namespace StalkerSpace;
 
 extern int g_AI_inactive_time;
 
+// Console cvar g_ai_unlimited_ammo gates the stalker infinite-ammo path. Default 1 = vanilla.
+int g_ai_unlimited_ammo = 1;
+
 CAI_Stalker::CAI_Stalker() :
 	m_sniper_update_rate(false),
 	m_sniper_fire_mode(false),
+	m_aim_min_speed(-1.f),
+	m_aim_min_angle(-1.f),
+	m_aim_max_angle(-1.f),
+	m_aim_predict_time(-1.f),
+	m_fire_queue_size_k(-1.f),
+	m_fire_queue_interval_k(-1.f),
 	m_take_items_enabled(true),
-	m_death_sound_enabled(true)
+	m_death_sound_enabled(true),
+	m_movement_hold(false)
 {
 	m_pPhysics_support = NULL;
 	m_animation_manager = NULL;
@@ -97,6 +107,9 @@ CAI_Stalker::CAI_Stalker() :
 	m_dbg_hud_draw					= false;
 #endif // DEBUG
 	m_registered_in_combat_on_migration = false;
+
+	m_anomaly_detect_start_time = 0;
+	m_anomaly_detect_suppress_until = 0;
 
 	// LookAtActor feature
 	savedOrientation.set(0.f, 0.f, 0.f);
@@ -800,6 +813,7 @@ BOOL CAI_Stalker::net_Spawn(CSE_Abstract* DC)
 	m_pPhysics_support->in_NetSpawn(e);
 
 	// LookAtActor feature
+	if (g_Alive())
 	{
 		IKinematics* k = smart_cast<IKinematics*>(Visual());
 		if (k)
@@ -820,20 +834,6 @@ void CAI_Stalker::net_Destroy()
 	inherited::net_Destroy();
 	CInventoryOwner::net_Destroy();
 	m_pPhysics_support->in_NetDestroy();
-
-	Device.remove_from_seq_parallel(
-		xr_make_delegate(
-			this,
-			&CAI_Stalker::update_object_handler
-		)
-	);
-
-#ifdef DEBUG
-	xr_delegate<void()>	f = xr_make_delegate(this,&CAI_Stalker::update_object_handler);
-	xr_vector<xr_delegate<void()> >::const_iterator	I;
-	I	= std::find(Device.seqParallel.begin(),Device.seqParallel.end(),f);
-	VERIFY							(I == Device.seqParallel.end());
-#endif // DEBUG
 
 	xr_delete(m_ce_close);
 	xr_delete(m_ce_far);
@@ -1020,23 +1020,9 @@ void CAI_Stalker::UpdateCL()
 
 			if (g_Alive())
 			{
-				if (g_mt_config.test(mtObjectHandler) && CObjectHandler::planner().initialized())
+				if (CObjectHandler::planner().initialized())
 				{
-					xr_delegate<void()> f = xr_make_delegate(
-						this, &CAI_Stalker::update_object_handler);
-#ifdef DEBUG
-			xr_vector<xr_delegate<void()> >::const_iterator	I;
-			I	= std::find(Device.seqParallel.begin(),Device.seqParallel.end(),f);
-			VERIFY							(I == Device.seqParallel.end());
-#endif
-					Device.seqParallel.push_back(
-						xr_make_delegate(this, &CAI_Stalker::update_object_handler));
-				}
-				else
-				{
-					START_PROFILE("stalker/client_update/object_handler")
-						update_object_handler();
-					STOP_PROFILE
+					update_object_handler();
 				}
 
 				if (
@@ -1522,25 +1508,17 @@ shared_str const& CAI_Stalker::aim_bone_id() const
 	return (m_aim_bone_id);
 }
 
-void aim_target(shared_str const& aim_bone_id, Fvector& result, const CGameObject* object)
-{
-	IKinematics* kinematics = smart_cast<IKinematics*>(object->Visual());
-	VERIFY(kinematics);
-
-	u16 bone_id = kinematics->LL_BoneID(aim_bone_id);
-	VERIFY2(bone_id != BI_NONE, make_string("Cannot find bone %s",bone_id));
-
-	Fmatrix const& bone_matrix = kinematics->LL_GetTransform(bone_id);
-	Fmatrix final;
-	final.mul_43(object->XFORM(), bone_matrix);
-	result = final.c;
-}
-
 void CAI_Stalker::aim_target(Fvector& result, const CGameObject* object)
 {
 	VERIFY(m_aim_bone_id.size());
 
-	::aim_target(m_aim_bone_id, result, object);
+	IKinematics* kinematics = PKinematics(object->Visual());
+	VERIFY(kinematics);
+
+	u16 bone_id = kinematics->LL_BoneID(*m_aim_bone_id);
+	VERIFY2(bone_id != BI_NONE, make_string("Cannot find bone %s", bone_id));
+
+	kinematics->LL_GetBoneWorldPosition(bone_id, object->XFORM(), result);
 }
 
 BOOL CAI_Stalker::AlwaysTheCrow()
@@ -1580,7 +1558,7 @@ bool CAI_Stalker::can_fire_right_now()
 
 bool CAI_Stalker::unlimited_ammo()
 {
-	return infinite_ammo() && CObjectHandler::planner().object().g_Alive();
+	return g_ai_unlimited_ammo && infinite_ammo() && CObjectHandler::planner().object().g_Alive();
 }
 
 void CAI_Stalker::ResetBoneProtections(LPCSTR imm_sect, LPCSTR bone_sect)

@@ -10,6 +10,15 @@
 
 #include "../xrRender/QueryHelper.h"
 
+#include	"../xrRender/dxRenderDeviceRender.h"
+namespace
+{
+bool ui_3d_icon_atlas_active = false;
+Fmatrix ui_3d_icon_project_saved;
+Fmatrix ui_3d_icon_full_transform_saved;
+}
+
+
 void CRender::render_menu()
 {
 	PIX_EVENT(render_menu);
@@ -84,10 +93,15 @@ namespace
 	CSector* s_freeze_sector = nullptr;
 }
 
+// The item and camera attachment UI was drawn this frame in render_forward (no upscaler)
+static bool s_hud_ui_drawn = false;
+
 void CRender::Render()
 {
 	RCache.constants_epoch++; // per-frame constant handlers run once per render (R_constant_setup::per_frame)
-	PIX_EVENT(CRender_Render);
+	PIX_EVENT_C(CRender_Render, dx10_marker_frame);
+	dx10_annotate_frame();
+	s_hud_ui_drawn = false;
 
 	rmNormal();
 
@@ -125,6 +139,9 @@ void CRender::Render()
 		CRenderTarget* T;
 		~upscale_scene_guard() { T->upscale_end_scene(); }
 	} upscale_guard = { Target };
+
+	if ((Device.dwFrame % (u32)ps_r__tex_evict_interval) == 0)
+		dxRenderDeviceRender::Instance().Resources->EvictStalledTextures();
 
 	//.	VERIFY					(g_pGameLevel && g_pGameLevel->pHUD);
 
@@ -209,7 +226,7 @@ void CRender::Render()
 
 	//******* Main render :: PART-0	-- first
 	{
-		PIX_EVENT(DEFER_PART0_SPLIT);
+		PIX_EVENT_C(DEFER_PART0_SPLIT, dx10_marker_gbuffer);
 		// level, SPLIT
 		Target->phase_scene_begin();
 		{ PIX_EVENT(STATIC_GEOMETRY); GMBase.r_dsgraph_render_static(0); }
@@ -245,7 +262,7 @@ void CRender::Render()
 
 	//******* Main render :: PART-1 (second)
 	{
-		PIX_EVENT(DEFER_PART1_SPLIT);
+		PIX_EVENT_C(DEFER_PART1_SPLIT, dx10_marker_gbuffer);
 		// level
 		Target->phase_scene_begin();
 		GMBase.r_dsgraph_capture_hud();
@@ -334,7 +351,7 @@ void CRender::Render()
 	// Directional light - fucking sun
 	if (bSUN) //bSUN && Device.dwFrame & 1 --Delayed sun update. Worth to check it in future
 	{
-		PIX_EVENT(DEFER_SUN);
+		PIX_EVENT_C(DEFER_SUN, dx10_marker_lights);
 		RImplementation.stats.l_visible ++;
 		render_sun_cascades();
 		Target->increment_light_marker();
@@ -344,7 +361,7 @@ void CRender::Render()
 	phase = PHASE_NORMAL;
 
 	{
-		PIX_EVENT(DEFER_SELF_ILLUM);
+		PIX_EVENT_C(DEFER_SELF_ILLUM, dx10_marker_lights);
 		Target->phase_accumulator();
 		// Render emissive geometry, stencil - write 0x0 at pixel pos
 		RCache.set_xform_project(Device.mProject);
@@ -369,19 +386,22 @@ void CRender::Render()
 		FLOAT ColorRGBA[4] = { 0,0,0,0 };
 		HW.pContext->ClearRenderTargetView(Target->rt_ssfx_bloom_emissive->pRT, ColorRGBA);
 		Target->u_setrt(Target->rt_ssfx_bloom_emissive, NULL, NULL, !RImplementation.o.dx10_msaa ? HW.pBaseZB : Target->rt_MSAADepth->pZRT);
-		GMBase.r_dsgraph_render_emissive(true, true);
+		// Keep regular HUD geometry out of the emissive target. It is already
+		// present in the scene texture sampled by the bloom build pass; drawing it
+		// here again treats every strict-sorted HUD surface as an emissive source.
+		GMBase.r_dsgraph_render_emissive(true, false);
 	}
 
 	// Lighting, non dependant on OCCQ
 	{
-		PIX_EVENT(DEFER_LIGHT_NO_OCCQ);
+		PIX_EVENT_C(DEFER_LIGHT_NO_OCCQ, dx10_marker_lights);
 		Target->phase_accumulator();
 		render_lights(LP_normal);
 	}
 
 	// Lighting, dependant on OCCQ
 	{
-		PIX_EVENT(DEFER_LIGHT_OCCQ);
+		PIX_EVENT_C(DEFER_LIGHT_OCCQ, dx10_marker_lights);
 		render_lights(LP_pending);
 	}
 
@@ -395,14 +415,16 @@ void CRender::Render()
 
 	// Postprocess
 	{
-		PIX_EVENT(DEFER_LIGHT_COMBINE);
+		PIX_EVENT_C(DEFER_LIGHT_COMBINE, dx10_marker_lights);
 		Target->phase_combine();
 	}
 
 	if (Details)
 		Details->details_clear();
 
-	if (g_hud)
+	// Item and camera attachment UI: drawn in render_forward (upstream's place, under the sorted HUD) unless the
+	// upscaler was on; then here, after the upscaler, at output resolution (neXt-Ray), so DLSS/FSR never smear it
+	if (g_hud && !s_hud_ui_drawn)
 	{
         PROF_EVENT("render_hud");
 		PIX_EVENT(HUD_UI);
@@ -421,6 +443,83 @@ void CRender::Render()
 }
 #include "../xrRender/CHudInitializer.h"
 
+void CRender::RenderUI3DDirect()
+{
+	HW.pContext->ClearDepthStencilView(HW.pBaseZB, D3D_CLEAR_DEPTH | D3D_CLEAR_STENCIL, 1.0f, 0);
+
+	RCache.set_Z(FALSE);
+	RCache.set_RT(HW.pBaseRT, 0);
+	GMUI3D.r_dsgraph_render_ui_3d();
+}
+
+bool CRender::GetUI3DIconAtlasInfo(u32& width, u32& height, float& resolution)
+{
+	if (!ps_r4_atlas || !Target || !Target->rt_ui_3d_icons)
+		return false;
+	width = Target->rt_ui_3d_icons->dwWidth;
+	height = Target->rt_ui_3d_icons->dwHeight;
+	resolution = clampr(ps_r4_atlas_resolution, 0.1f, 1.f);
+	return true;
+}
+
+bool CRender::BeginUI3DIconAtlas()
+{
+	if (ui_3d_icon_atlas_active || !ps_r4_atlas || !Target || !Target->rt_ui_3d_icons)
+		return false;
+
+	ui_3d_icon_atlas_active = true;
+	ui_3d_icon_project_saved = Device.mProject3DIcons;
+	ui_3d_icon_full_transform_saved = Device.mFullTransform3DIcons;
+
+	const u32 width = Target->rt_ui_3d_icons->dwWidth;
+	const u32 height = Target->rt_ui_3d_icons->dwHeight;
+	// Match the allocated atlas aspect ratio to keep model proportions intact.
+	Device.mProject3DIcons.build_projection_ortho(UI_3D_ICON_ORTHO_HEIGHT * float(width) / float(height),
+		UI_3D_ICON_ORTHO_HEIGHT, UI_3D_ICON_NEAR_PLANE, UI_3D_ICON_FAR_PLANE);
+	Device.mFullTransform3DIcons.mul(Device.mProject3DIcons, Device.mView);
+
+	const ref_rt& raw = Target->rt_ui_3d_icons_raw_msaa ?
+		Target->rt_ui_3d_icons_raw_msaa : Target->rt_ui_3d_icons_raw;
+	Target->u_setrt(raw, nullptr, nullptr, Target->rt_ui_3d_icons_depth->pZRT);
+	Target->set_viewport_size(HW.pContext, width, height);
+
+	const float clear_color[4] = {0.f, 0.f, 0.f, 0.f};
+	HW.pContext->ClearRenderTargetView(raw->pRT, clear_color);
+	HW.pContext->ClearDepthStencilView(Target->rt_ui_3d_icons_depth->pZRT,
+		D3D_CLEAR_DEPTH | D3D_CLEAR_STENCIL, 1.f, 0);
+	return true;
+}
+
+void CRender::BeginUI3DIconAtlasItem()
+{
+	// The MT graph retains every submission, including repeated visuals in different cells.
+}
+
+void CRender::EndUI3DIconAtlas()
+{
+	if (!ui_3d_icon_atlas_active)
+		return;
+
+	RCache.set_Z(FALSE);
+	GMUI3D.r_dsgraph_render_ui_3d();
+
+	// The postprocess expects an ordinary Texture2D. Resolve the multisampled
+	// model atlas after all cells have been rendered, before sampling it.
+	Target->u_setrt(Target->rt_ui_3d_icons->dwWidth, Target->rt_ui_3d_icons->dwHeight,
+		nullptr, nullptr, nullptr, nullptr);
+	if (Target->rt_ui_3d_icons_raw_msaa)
+		HW.pContext->ResolveSubresource(Target->rt_ui_3d_icons_raw->pSurface, 0,
+			Target->rt_ui_3d_icons_raw_msaa->pSurface, 0, DXGI_FORMAT_R8G8B8A8_UNORM);
+	Target->phase_ui_3d_icons_postprocess();
+
+	Device.mProject3DIcons = ui_3d_icon_project_saved;
+	Device.mFullTransform3DIcons = ui_3d_icon_full_transform_saved;
+	Target->u_setrt(Device.dwWidth, Device.dwHeight, HW.pBaseRT, nullptr, nullptr, HW.pBaseZB);
+	Target->set_viewport_size(HW.pContext, float(Device.dwWidth), float(Device.dwHeight));
+	RCache.set_Z(FALSE);
+	ui_3d_icon_atlas_active = false;
+}
+
 void CRender::render_forward()
 {
 	RImplementation.o.distortion = RImplementation.o.distortion_enabled; // enable distorion
@@ -437,6 +536,19 @@ void CRender::render_forward()
 		GMBase.fade_render(); // faded-portals
 		GMBase.r_dsgraph_render_sorted(false); // strict-sorted geoms
 		g_pGamePersistent->Environment().RenderLast(); // rain/thunder-bolts
+
+		// Item and camera attachment UI draws before the sorted HUD so nearer glass and the post chain cover it.
+		// With the upscaler on, Render() draws it after the upscaler instead (neXt-Ray)
+		if (g_hud && !upscale_scene_active)
+		{
+			PROF_EVENT("render_hud");
+			if (g_hud->RenderActiveItemUIQuery())
+				GMBase.r_dsgraph_render_hud_ui();
+			if (g_hud->RenderCamAttachedUIQuery())
+				GMBase.r_dsgraph_render_cam_ui();
+			s_hud_ui_drawn = true;
+		}
+
 		GMBase.r_dsgraph_render_sorted_hud();
 	}
 

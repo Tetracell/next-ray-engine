@@ -145,7 +145,8 @@ class XRPHYSICS_API CPhysicsElement :
 {
 public:
 	u16 m_SelfID;
-    float m_fScale;
+    Fvector m_fScale;
+    virtual void SetScale(Fvector scale) = 0;
     virtual void SetScale(float scale) = 0;
 	virtual CPhysicsShell* PhysicsShell() = 0;
 	virtual void set_ContactCallback(ContactCallbackFun* callback) = 0;
@@ -403,6 +404,9 @@ public:
 	virtual void DisableCollision() = 0;
 	virtual void EnableCollision() = 0;
 	virtual void SetDeadBody() = 0;
+	virtual void SetScale(Fvector scale) = 0;
+	virtual void SetScale(float scale) = 0;
+	virtual Fvector GetScale() = 0;
 	virtual void PureStep(float step = fixed_step) = 0;
 	virtual void SetGlTransformDynamic(const Fmatrix& form) = 0;
 	virtual void CollideAll() = 0;
@@ -435,6 +439,7 @@ public:
 	virtual Fmatrix& ObjectInRoot() = 0;
 	virtual void ObjectToRootForm(const Fmatrix& form) = 0;
 	virtual void SetPrefereExactIntegration() = 0;
+	virtual void SetForceExactIntegration() = 0;
 	virtual ~CPhysicsShell();
 	//build_FromKinematics		in returns elements  & joint pointers according bone IDs;
 	//	DECLARE_SCRIPT_REGISTER_FUNCTION

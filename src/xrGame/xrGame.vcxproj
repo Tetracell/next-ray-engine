@@ -1056,6 +1056,7 @@
     <ClInclude Include="Car.h" />
     <ClInclude Include="CarDamageParticles.h" />
     <ClInclude Include="CarLights.h" />
+    <ClInclude Include="CarDrone.h" />
     <ClInclude Include="CarWeapon.h" />
     <ClInclude Include="car_memory.h" />
     <ClInclude Include="cdkey_ban_list.h" />
@@ -1076,6 +1077,7 @@
     <ClInclude Include="configs_dumper.h" />
     <ClInclude Include="configs_dump_verifyer.h" />
     <ClInclude Include="console_registrator.h" />
+    <ClInclude Include="shader_bus_script.h" />
     <ClInclude Include="controller_state_panic_inline.h" />
     <ClInclude Include="control_action.h" />
     <ClInclude Include="control_action_inline.h" />
@@ -1226,7 +1228,11 @@
     <ClInclude Include="game_cl_teamdeathmatch_snd_messages.h" />
     <ClInclude Include="game_events_handler.h" />
     <ClInclude Include="game_graph.h" />
+    <ClInclude Include="game_graph_builder.h" />
     <ClInclude Include="game_graph_inline.h" />
+    <ClInclude Include="spawn_overlays.h" />
+    <ClInclude Include="spawn_packs.h" />
+    <ClInclude Include="spawn_templates.h" />
     <ClInclude Include="game_level_cross_table.h" />
     <ClInclude Include="game_level_cross_table_inline.h" />
     <ClInclude Include="game_location_selector.h" />
@@ -1337,6 +1343,7 @@
     <ClInclude Include="inventory_upgrade_root.h" />
     <ClInclude Include="inventory_upgrade_root_inline.h" />
     <ClInclude Include="invincible_fury.h" />
+    <ClInclude Include="iscript_attachment.h" />
     <ClInclude Include="item_manager.h" />
     <ClInclude Include="key_binding_registrator.h" />
     <ClInclude Include="killer_victim_velocity_angle.h" />
@@ -1631,6 +1638,9 @@
     <ClInclude Include="script_monster_action.h" />
     <ClInclude Include="script_monster_action_inline.h" />
     <ClInclude Include="script_monster_hit_info.h" />
+    <ClInclude Include="script_monster_enemy_info.h" />
+    <ClInclude Include="script_monster_home_info.h" />
+    <ClInclude Include="script_monster_movement_info.h" />
     <ClInclude Include="script_movement_action.h" />
     <ClInclude Include="script_movement_action_inline.h" />
     <ClInclude Include="script_object.h" />
@@ -1843,6 +1853,7 @@
     <ClInclude Include="trade_parameters_inline.h" />
     <ClInclude Include="traffic_optimization.h" />
     <ClInclude Include="trajectories.h" />
+    <ClInclude Include="UI3dStatic.h" />
     <ClInclude Include="UIAchivementsIndicator.h" />
     <ClInclude Include="UICursor.h" />
     <ClInclude Include="gamepad.h" />
@@ -1990,6 +2001,7 @@
     <ClInclude Include="ui\UISubLine.h" />
     <ClInclude Include="ui\UITabButton.h" />
     <ClInclude Include="ui\UITabButtonMP.h" />
+    <ClInclude Include="ui\UITabScrollArrows.h" />
     <ClInclude Include="ui\UITabControl.h" />
     <ClInclude Include="ui\UITalkDialogWnd.h" />
     <ClInclude Include="ui\UITalkWnd.h" />
@@ -2031,7 +2043,7 @@
     <ClInclude Include="WeaponAmmo.h" />
     <ClInclude Include="WeaponAutomaticShotgun.h" />
     <ClInclude Include="WeaponBinoculars.h" />
-    <ClInclude Include="WeaponBinocularsVision.h" />
+    <ClInclude Include="ui\UIBinocularsVision.h" />
     <ClInclude Include="weaponBM16.h" />
     <ClInclude Include="WeaponCustomAuto.h" />
     <ClInclude Include="WeaponCustomPistol.h" />
@@ -2741,6 +2753,7 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="CarSound.cpp" />
+    <ClCompile Include="CarDrone.cpp" />
     <ClCompile Include="CarWeapon.cpp" />
     <ClCompile Include="CarWheels.cpp" />
     <ClCompile Include="car_memory.cpp" />
@@ -2769,6 +2782,10 @@
     </ClCompile>
     <ClCompile Include="console_commands_mp.cpp" />
     <ClCompile Include="console_registrator_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="shader_bus_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
@@ -2959,6 +2976,10 @@
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
     <ClCompile Include="game_cl_teamdeathmatch.cpp" />
+    <ClCompile Include="game_graph_builder.cpp" />
+    <ClCompile Include="spawn_overlays.cpp" />
+    <ClCompile Include="spawn_packs.cpp" />
+    <ClCompile Include="spawn_templates.cpp" />
     <ClCompile Include="game_graph_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
@@ -3584,6 +3605,18 @@
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
     </ClCompile>
+    <ClCompile Include="script_monster_enemy_info_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="script_monster_home_info_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
+    <ClCompile Include="script_monster_movement_info_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="script_movement_action.cpp" />
     <ClCompile Include="script_movement_action_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
@@ -3927,6 +3960,7 @@
     <ClCompile Include="trade_parameters.cpp" />
     <ClCompile Include="traffic_optimization.cpp" />
     <ClCompile Include="trajectories.cpp" />
+    <ClCompile Include="UI3dStatic.cpp" />
     <ClCompile Include="UIAchivementsIndicator.cpp" />
     <ClCompile Include="UICursor.cpp" />
     <ClCompile Include="gamepad.cpp" />
@@ -4199,6 +4233,8 @@
     <ClCompile Include="ui\UITabButton.cpp" />
     <ClCompile Include="ui\UITabButtonMP.cpp" />
     <ClCompile Include="ui\UITabControl.cpp" />
+    <ClCompile Include="ui\UITabControl_scroll.cpp" />
+    <ClCompile Include="ui\UITabScrollArrows.cpp" />
     <ClCompile Include="ui\UITabControl_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
@@ -4259,7 +4295,11 @@
     </ClCompile>
     <ClCompile Include="WeaponAutomaticShotgun.cpp" />
     <ClCompile Include="WeaponBinoculars.cpp" />
-    <ClCompile Include="WeaponBinocularsVision.cpp" />
+    <ClCompile Include="ui\UIBinocularsVision.cpp" />
+    <ClCompile Include="ui\UIBinocularsVision_script.cpp">
+      <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>
+    </ClCompile>
     <ClCompile Include="WeaponBinoculars_script.cpp">
       <PrecompiledHeaderFile>pch_script.h</PrecompiledHeaderFile>
       <PrecompiledHeaderOutputFile>$(IntDir)$(ProjectName)_script.pch</PrecompiledHeaderOutputFile>

@@ -28,6 +28,8 @@
 #include "memory_manager.h"
 #include "ai/monsters/basemonster/base_monster.h"
 
+float g_ai_vision_speed_boost = 1.0f;
+
 #ifndef MASTER_GOLD
 #	include "actor.h"
 #	include "ai_debug.h"
@@ -197,6 +199,24 @@ u32 CVisualMemoryManager::visible_object_time_last_seen(const CObject* object) c
 		return u32(-1);
 }
 
+u32 CVisualMemoryManager::memory_time(const CObject* object) const
+{
+	VISIBLES::const_iterator I = std::find(m_objects->begin(), m_objects->end(), object_id(object));
+	if (I != m_objects->end())
+		return (I->m_level_time);
+	else
+		return (0);
+}
+
+Fvector CVisualMemoryManager::memory_position(const CObject* object) const
+{
+	VISIBLES::const_iterator I = std::find(m_objects->begin(), m_objects->end(), object_id(object));
+	if (I != m_objects->end())
+		return (I->m_object_params.m_position);
+	else
+		return (Fvector().set(0.f, 0.f, 0.f));
+}
+
 bool CVisualMemoryManager::visible_right_now(const CGameObject* game_object) const
 {
 	if (!m_objects)
@@ -313,7 +333,7 @@ float CVisualMemoryManager::object_visible_distance(const CGameObject* game_obje
 
 	float distance = (1.f - alpha / fov) * (max_view_distance - min_view_distance) + min_view_distance;
 
-	return (distance);
+	return (distance * m_view_distance_factor);
 }
 
 float CVisualMemoryManager::object_luminocity(const CGameObject* game_object) const
@@ -363,7 +383,7 @@ float CVisualMemoryManager::get_visible_value(const CGameObject* game_object, fl
 	if (ai().script_engine().functor("visual_memory_manager.get_visible_value", funct))
 		return (funct(m_object ? m_object->lua_game_object() : 0, game_object ? game_object->lua_game_object() : 0,
 		              time_delta, current_state().m_time_quant, luminocity, current_state().m_velocity_factor,
-		              object_velocity, distance, object_distance, always_visible_distance));
+		              object_velocity, distance, object_distance, always_visible_distance)) * g_ai_vision_speed_boost * m_vision_speed;
 	//-Alundaio
 
 	return (
@@ -373,7 +393,7 @@ float CVisualMemoryManager::get_visible_value(const CGameObject* game_object, fl
 		(1.f + current_state().m_velocity_factor * object_velocity) *
 		(distance - object_distance) /
 		(distance - always_visible_distance)
-	);
+	) * g_ai_vision_speed_boost * m_vision_speed;
 }
 
 CNotYetVisibleObject* CVisualMemoryManager::not_yet_visible_object(const CGameObject* game_object)

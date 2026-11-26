@@ -1,7 +1,13 @@
-# exclude all dot files except .gitignore
+# exclude dot files except repository metadata and workflow definitions
 .*
 !.gitignore
 !.gitattributes
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/*.yml
+!/.github/workflows/*.yaml
 
 # exclude binaries and temporary files
 _build/
@@ -31,6 +37,10 @@ src/3rd party/luajit-2/src/*.obj
 src/3rd party/luajit-2/src/*.pdb
 src/3rd party/luajit-2/src/host/*.exe
 
+# compressor runtime artifacts
+compressor/engine.log
+compressor/mod/
+
 # emacs temp file
 \#*\#
 *~
@@ -50,3 +60,6 @@ src/3rd party/FidelityFX-FSR3/generated*/
 # local build output
 /package/
 /package_pdb/
+*~
+
+__pycache__/

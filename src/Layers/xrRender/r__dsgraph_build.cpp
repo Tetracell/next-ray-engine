@@ -50,6 +50,34 @@ namespace hiz { bool test_static(const Fbox& box, bool tree); }
 namespace sun_receivers { bool test_caster(const Fbox& box, u32 cascade); }
 #endif
 
+ICF bool R4FullDetailRejectStatic(dxRender_Visual* pVisual, bool normalPhase)
+{
+#if RENDER == R_R4
+	if (ps_r4_full_detail_distance_scale >= 1.f || !normalPhase ||
+		pVisual->flags.test(IRenderVisualFlags::eIgnoreOptimization) || !g_pGamePersistent ||
+		!g_pGamePersistent->Environment().CurrentEnv)
+		return false;
+
+	// Keep the engine's normal LOD selection alive beyond the full-detail range.
+	if (pVisual->Type == MT_LOD)
+		return false;
+
+	const float farPlane = g_pGamePersistent->Environment().CurrentEnv->far_plane;
+	const float fullDetailDistance = std::max(100.f, farPlane * ps_r4_full_detail_distance_scale);
+	float distanceSquared;
+	const float ssa = CalcSSA(distanceSquared, pVisual->vis.sphere.P, pVisual);
+	const float nearestDistance = _sqrt(distanceSquared) - pVisual->vis.sphere.R;
+	if (nearestDistance <= fullDetailDistance)
+		return false;
+
+	const float transitionRange = std::max(1.f, farPlane - fullDetailDistance);
+	const float transition = clampr((nearestDistance - fullDetailDistance) / transitionRange, 0.f, 1.f);
+	return ssa <= r_ssaDISCARD * (1.f + transition * 11.f);
+#else
+	return false;
+#endif
+}
+
 void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix* xform)
 {
 #ifdef USE_DX11
@@ -61,6 +89,42 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 
 	Fvector Center;
 	xform->transform_tiny(Center, pVisual->vis.sphere.P);
+    // Attachments can submit the same visual at several instance transforms in one pass.
+    if (!get_UI3D() && val_pObject && !val_pObject->dcast_CObject())
+    {
+        owned_transforms.push_back(*xform);
+        xform = &owned_transforms.back();
+    }
+    if (get_UI3D())
+    {
+        VERIFY(pVisual->shader._get());
+        const float distance_squared = Device.vCameraPosition.distance_to_sqr(Center);
+#if RENDER == R_R4
+        // Match main's DX11 icon classification and SSA test, outside world HOM culling.
+        const float icon_ssa = pVisual->vis.sphere.R / (distance_squared + EPS);
+        if (icon_ssa <= r_ssaDISCARD) return;
+        ShaderElement* shader = RImplementation.rimp_select_sh_dynamic(pVisual, distance_squared + EPS);
+        if (!shader) return;
+#endif
+        owned_transforms.push_back(*xform);
+        Fmatrix* icon_transform = &owned_transforms.back();
+#if RENDER == R_R4
+        if (shader->flags.bStrictB2F)
+            RGraph.mapUI3DSorted.emplace_back(distance_squared + EPS, icon_ssa, nullptr, pVisual, icon_transform, shader, false);
+        else
+        {
+            RGraph.mapUI3D.emplace_back(distance_squared + EPS, icon_ssa, nullptr, pVisual, icon_transform, shader, false);
+            if (shader->flags.bEmissive)
+                RGraph.mapUI3DEmissive.emplace_back(distance_squared + EPS, icon_ssa, nullptr, pVisual,
+                    icon_transform, pVisual->shader->E[4]._get(), false);
+        }
+#else
+        // DX8/9/10 use the dedicated icon shader for every mesh, far to near.
+        RGraph.mapUI3DSorted.emplace_back(distance_squared, 1.f, nullptr, pVisual, icon_transform, nullptr, false);
+#endif
+        return;
+    }
+
 
 	float distSQ;
 	float SSA = CalcSSA(distSQ, Center, pVisual);
@@ -76,6 +140,20 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
     }
     
 
+	// HOM occlusion culling for dynamic objects
+    if (ps_r__common_flags.test(RFLAG_HOM_DYNAMIC))
+    {
+#if RENDER!=R_R1
+        if (i_mask[CDSGraphManager::fl_normal])
+#endif
+        {
+            Fbox world_bb;
+            world_bb.xform(pVisual->vis.box, *xform);
+            if (!RImplementation.HOM.visible(world_bb))
+                return;
+        }
+    }
+
 	// Distortive geometry should be marked and R2 special-cases it
 	// a) Allow to optimize RT order
 	// b) Should be rendered to special distort buffer in another pass
@@ -83,7 +161,9 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 
 	if (sh_d && sh_d->flags.bDistort && i_mask[sh_d->flags.iPriority/2])
 	{
-		if (i_mask[CDSGraphManager::fl_hud])
+		if (val_fCustomFOV != 0.f)
+			RGraph.mapCustomFOVSorted.Distort.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, false, val_fCustomFOV);
+		else if (i_mask[CDSGraphManager::fl_hud])
 			RGraph.mapHUDSorted.Distort.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, i_mask[CDSGraphManager::fl_hud]);
 		else
 			RGraph.mapDynamicSorted.Distort.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, i_mask[CDSGraphManager::fl_hud]);
@@ -107,7 +187,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 			break;
 
 		case 1: {
-			RGraph.mapHUD.emplace_back(EPS, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+			(get_CamAttached() ? RGraph.mapCamAttached : RGraph.mapHUD).emplace_back(EPS, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 
 			// SSS: Deprecated
 			/*if (!sh->passes[0]->ps->hud_disabled)
@@ -123,16 +203,32 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 		}
 
 		case 2: {
-			RGraph.mapScopeHUD.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+			(get_CamAttached() ? RGraph.mapScopeCamAttached : RGraph.mapScopeHUD).emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 			return;
 		}
 
 		case 3: {
-			RGraph.mapScopeHUDSorted.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+			if (get_CamAttached())
+				RGraph.mapScopeCamAttachedSorted.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
+			else
+				RGraph.mapScopeHUDSorted.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 			return;
 		}
 	}
 #endif
+    if (get_HUD() && val_fCustomFOV != 0.f)
+    {
+        if (sh->flags.bStrictB2F)
+            RGraph.mapCustomFOVSorted.Sorted.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, false, val_fCustomFOV);
+        else
+            RGraph.mapCustomFOV.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, false, val_fCustomFOV);
+#if RENDER != R_R1
+        if (sh->flags.bEmissive)
+            RGraph.mapCustomFOVSorted.Emissive.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, false, val_fCustomFOV);
+#endif
+        return;
+    }
+
 	// HUD rendering
 	if (i_mask[CDSGraphManager::fl_hud])
 	{
@@ -199,7 +295,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 
 	// Shadows registering
 #if RENDER==R_R1
-	DSGraphItem<u32, false> item = { 0, SSA, val_pObject, pVisual, xform, nullptr, i_mask[CDSGraphManager::fl_hud] };
+	DSGraphItem<u32, false> item = { 0, SSA, val_pObject, pVisual, xform, nullptr, get_HUD(), val_fCustomFOV };
 	R_dsgraph::mapDSGraphItemsMap<u32, false>::TNode N = { 0, item };
 	RImplementation.L_Shadows->add_element(N);
 #endif
@@ -207,9 +303,10 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 		return;
 
 	// strict-sorting selection
-	if (sh->flags.bStrictB2F)
+	if (sh->flags.bStrictB2F && !pVisual->dcast_ParticleCustom())
 	{
-		RGraph.mapDynamicSorted.Sorted.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+		auto& graph = val_fCustomFOV != 0.f ? RGraph.mapCustomFOVSorted.Sorted : RGraph.mapDynamicSorted.Sorted;
+		graph.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 		return;
 	}
 
@@ -220,14 +317,17 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 	// c) Should not cast shadows
 	// d) Should be rendered to accumulation buffer in the second pass
 	if (sh->flags.bEmissive)
-		RGraph.mapDynamicSorted.Emissive.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, i_mask[CDSGraphManager::fl_hud]);
+	{
+		auto& graph = val_fCustomFOV != 0.f ? RGraph.mapCustomFOVSorted.Emissive : RGraph.mapDynamicSorted.Emissive;
+		graph.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh_d, get_HUD(), val_fCustomFOV);
+	}
 
 	if (sh->flags.bWmark && i_mask[CDSGraphManager::fl_wmarks])
 	{
 		if (i_mask[CDSGraphManager::fl_hud])
-			RGraph.mapHUDSorted.Wmark.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+			RGraph.mapHUDSorted.Wmark.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 		else
-			RGraph.mapDynamicSorted.Wmark.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+			RGraph.mapDynamicSorted.Wmark.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, get_HUD(), val_fCustomFOV);
 		return;
 	}
 #endif
@@ -246,7 +346,7 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 #if RENDER==R_R1
 		AddToRenderQueue(RGraph.mapDynamicPasses[shader_priority][iPass], item, pass);
 #else
-		AddToRenderQueue(RGraph.mapDynamicPasses[shader_priority][iPass], { 0, SSA, val_pObject, pVisual, xform, nullptr, i_mask[CDSGraphManager::fl_hud] }, pass);
+		AddToRenderQueue(RGraph.mapDynamicPasses[shader_priority][iPass], { 0, SSA, val_pObject, pVisual, xform, nullptr, get_HUD(), val_fCustomFOV }, pass);
 #endif
 	}
 }
@@ -516,7 +616,7 @@ void CDSGraphManager::add_Dynamic(IRenderVisual* piVisual, Fmatrix* xform)
 		// Add all children, doesn't perform any tests
 		CKinematics* pV = (CKinematics*)pVisual;
 		BOOL _use_lod = FALSE;
-		if (pV->m_lod)
+		if (pV->m_lod && !get_UI3D())
 		{
 			Fvector Tpos;
 			float D;
@@ -530,7 +630,9 @@ void CDSGraphManager::add_Dynamic(IRenderVisual* piVisual, Fmatrix* xform)
 		else
 		{
 			//pV->CalculateBones(TRUE);
-			if (i_mask[CDSGraphManager::fl_normal])
+			if (get_UI3D())
+				pV->CalculateBones(TRUE);
+			else if (i_mask[CDSGraphManager::fl_normal])
 				pV->CalculateWallmarks();
 			add_leafs_Dynamic(pV->children, xform);
 		}
@@ -583,7 +685,7 @@ void CDSGraphManager::add_Dynamic(dxRender_Visual* pVisual, Fmatrix* xform)
 		// Add all children, doesn't perform any tests
 		CKinematics* pV = (CKinematics*)pVisual;
 		BOOL _use_lod = FALSE;
-		if (pV->m_lod)
+		if (pV->m_lod && !get_UI3D())
 		{
 			Fvector Tpos;
 			float D;
@@ -597,7 +699,9 @@ void CDSGraphManager::add_Dynamic(dxRender_Visual* pVisual, Fmatrix* xform)
 		else
 		{
 			//pV->CalculateBones(TRUE);
-			if (i_mask[CDSGraphManager::fl_normal])
+			if (get_UI3D())
+				pV->CalculateBones(TRUE);
+			else if (i_mask[CDSGraphManager::fl_normal])
 				pV->CalculateWallmarks();
 			add_leafs_Dynamic(pV->children, xform);
 		}
@@ -645,6 +749,9 @@ void CDSGraphManager::add_Static(IRenderVisual* piVisual, CFrustum& frustum, u32
 	EFC_Visible VIS = frustum.testSAABB(vis.sphere.P, vis.sphere.R, vis.box.data(), planes);
 
 	if (fcvNone == VIS)
+		return;
+
+	if (R4FullDetailRejectStatic(pVisual, i_mask[CDSGraphManager::fl_normal]))
 		return;
 
 #if RENDER!=R_R1
@@ -760,6 +867,9 @@ void CDSGraphManager::add_Static_MultiFrustum(IRenderVisual* piVisual, const xr_
 	if (!anyVisible)
 		return;
 
+	if (R4FullDetailRejectStatic(pVisual, i_mask[CDSGraphManager::fl_normal]))
+		return;
+
 #if RENDER!=R_R1
 	if (i_mask[CDSGraphManager::fl_normal])//phase normal
 #endif
@@ -816,6 +926,9 @@ void CDSGraphManager::add_Static_MultiFrustum(IRenderVisual* piVisual, const xr_
 
 void CDSGraphManager::add_leaf_Static(dxRender_Visual* pVisual)
 {
+	if (R4FullDetailRejectStatic(pVisual, i_mask[CDSGraphManager::fl_normal]))
+		return;
+
 #if RENDER!=R_R1
 	if (i_mask[CDSGraphManager::fl_normal])//phase normal
 #endif

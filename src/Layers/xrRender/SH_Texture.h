@@ -7,6 +7,7 @@
 
 class ENGINE_API CAviPlayerCustom;
 class CTheoraSurface;
+class CGIFAnimationPlayer;
 
 class ECORE_API CTexture : public xr_resource_named
 {
@@ -30,6 +31,7 @@ public:
 	void __stdcall apply_theora(u32 stage);
 	void __stdcall apply_avi(u32 stage);
 	void __stdcall apply_seq(u32 stage);
+    void __stdcall apply_gif(u32 stage);
 	void __stdcall apply_normal(u32 stage);
 
 	void Preload();
@@ -136,6 +138,10 @@ public: //	Public class members (must be encapsulated furthur)
 #endif	//	USE_DX10
 	} flags;
 
+    u32 dwLastUsedFrame = 0; // frame index of last Apply() call — used for eviction
+    // Set by owners that copy the surface instead of applying it, eviction skips these
+    bool bNoEvict = false;
+
 	xr_delegate<void(u32)> bind;
 
 
@@ -176,6 +182,8 @@ private:
 	// Description
 	ID3DBaseTexture* desc_cache;
 	D3D_TEXTURE2D_DESC desc;
+
+    CGIFAnimationPlayer* gifPlayer;
 
 #if defined(USE_DX10) || defined(USE_DX11)
 	ID3DShaderResourceView*			m_pSRView;

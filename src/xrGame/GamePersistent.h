@@ -17,7 +17,7 @@ class CGamePersistent :
 
 	// ambient particles
 	intrusive_ptr<CParticlesObject> ambient_particles;
-	u32 ambient_sound_next_time [32]; //max snd channels
+	xr_vector<u32> ambient_sound_next_time; //max snd channels
 	u32 ambient_effect_next_time;
 	u32 ambient_effect_stop_time;
 
@@ -55,6 +55,12 @@ class CGamePersistent :
 	void UpdateDof();
 
 public:
+	virtual float OnThunderboltSound(LPCSTR file, float distance);
+	virtual float OnRainSound(LPCSTR file);
+
+private:
+
+public:
 	ui_core* m_pUI_core;
 	IReader* pDemoFile;
 	u32 uTime2Change;
@@ -76,6 +82,7 @@ public:
 
 	virtual void _BCL OnFrame();
 	virtual void ImGui_OnRender(LPCSTR name);
+	virtual void ImGui_OnShow(bool show);
 	virtual void OnEvent(EVENT E, u64 P1, u64 P2);
 
 	virtual void UpdateGameType();

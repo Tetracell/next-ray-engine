@@ -27,11 +27,12 @@ public:
 		u32 bVolumetric:1;
 		u32 bHudMode: 1;
 		u32 bOccq:       1;
+		u32 bOrtho: 1;
 	} flags;
 
-	Fvector position;
-	Fvector direction;
-	Fvector right;
+	Fvector position, position_internal;
+	Fvector direction, direction_internal;
+	Fvector right, right_internal;
 	float range;
 	float cone;
 	Fcolor color;
@@ -109,7 +110,6 @@ public:
 		ID3DQuery*	Q;
 		bool		visible;		// visible/invisible
 		bool		pending;		// test is still pending
-		bool		query_active;	// GPU query is in-flight
 		u16			smap_ID;
 		float		distance;
 	}				vis;
@@ -152,6 +152,12 @@ public:
 	bool has_outdoor_light();
 	xrCriticalSection sectors_lc;
 #endif	//	RENDER!=R_R1
+	virtual void set_ortho(bool b)
+	{
+		flags.bOrtho = b;
+	}
+	virtual bool get_ortho() { return flags.bOrtho; }
+
 
 	virtual void set_shadow(bool b);
 	virtual void set_volumetric(bool b)
@@ -167,8 +173,12 @@ public:
 	virtual void set_volumetric_distance(float fValue) { m_volumetric_distance = 1.0f; }
 
 	virtual void set_position(const Fvector& P, const float eps = EPS);
+	virtual const Fvector& get_position() const { return position_internal; }
 	virtual void set_rotation(const Fvector& D, const Fvector& R, const float eps = EPS);
+	virtual const Fvector& get_rotation() const { return direction_internal; }
+	virtual const Fvector& get_right() const { return right_internal; }
 	virtual void set_cone(float angle);
+	virtual const float& get_cone() const { return cone; }
 	virtual void set_range(float R);
 
 	virtual void set_virtual_size(float R)
@@ -179,7 +189,7 @@ public:
 	virtual void set_color(const Fcolor& C) { color.set(C); }
 	virtual void set_color(float r, float g, float b) { color.set(r, g, b, 1); }
 	virtual void set_texture(LPCSTR name);
-	virtual void set_hud_mode(bool b) { flags.bHudMode = b; }
+	virtual void set_hud_mode(bool b);
 	virtual bool get_hud_mode() { return flags.bHudMode; };
 
 	virtual void set_occq_mode(bool b) { flags.bOccq = b; }
@@ -192,6 +202,7 @@ public:
 	virtual CObject* get_decor_object(int index = 0) { return decor_object[index]; };
 
 	virtual void set_is_playerlight(bool b) { sss_is_playerlight = b; };
+	virtual bool get_is_playerlight() { return sss_is_playerlight; };
 
 	virtual void spatial_move();
 	virtual Fvector spatial_sector_point();

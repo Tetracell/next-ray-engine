@@ -24,6 +24,7 @@
 #include "map_manager.h"
 #include "player_hud.h"
 #include "script_attachment_manager.h"
+#include "UI3dStatic.h"
 
 #include "GametaskManager.h"
 
@@ -72,34 +73,7 @@ void CFontManager::InitializeFonts()
 	pFontStat->SetInterval(0.75f, 1.0f);
 }
 
-LPCSTR CFontManager::GetFontTexName(LPCSTR section)
-{
-	static char* tex_names[] = {"texture800", "texture", "texture1600", "texture2160"};
-	int def_idx = 1; //default 1024x768
-	int idx = def_idx;
-#if 0
-    u32 w = Device.dwWidth;
-
-    if(w<=800)		idx = 0;
-    else if(w<=1280)idx = 1;
-    else 			idx = 2;
-#else
-	u32 h = Device.dwHeight;
-
-	if (h <= 600) idx = 0;
-	else if (h < 1024) idx = 1;
-	else if (h < 1440) idx = 2;
-	else idx = 3;
-#endif
-
-	while (idx >= 0)
-	{
-		if (pSettings->line_exist(section, tex_names[idx]))
-			return pSettings->r_string(section, tex_names[idx]);
-		--idx;
-	}
-	return pSettings->r_string(section, tex_names[def_idx]);
-}
+LPCSTR CFontManager::GetFontTexName(LPCSTR section) { return GetFontTextureName(section); }
 
 void CFontManager::InitializeFont(CGameFont*& F, LPCSTR section, u32 flags)
 {
@@ -257,7 +231,7 @@ void CHUDManager::Render_Last(IDSGraphManager* DM)
 void CHUDManager::Render_R1_Attachment_UI()
 {
 	for (auto att : g_pGamePersistent->AttachmentUIsToRender)
-		att->RenderUI();
+		att->RenderUI(false);
 
 	g_pGamePersistent->AttachmentUIsToRender.clear_not_free();
 }
@@ -320,6 +294,7 @@ void CHUDManager::RenderUI()
 
 	if (true /*|| psHUD_Flags.is(HUD_DRAW | HUD_DRAW_RT)*/)
 	{
+		CUI3dStatic::PrepareAtlas();
 		HitMarker.Render();
 		if (pUIGame)
 		{

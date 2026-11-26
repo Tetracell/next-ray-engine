@@ -702,7 +702,8 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 		for (int slot = 0; slot < 8; slot++)
 			Lights_Array[slot].set(0, 0, 0, 0);
 
-		xr_vector<light*> LightsSort;
+		static xr_vector<light*> LightsSort;
+        LightsSort.clear();
 		bool CheckPackage = true;
 
 		if (Device.dwFrame > sss_currentframe)
@@ -710,12 +711,22 @@ void CRenderTarget::phase_ssfx_sss_ext(light_Package& LP)
 			sss_currentframe = Device.dwFrame + 2;
 
 			xr_vector<light*>& source = LP.v_shadowed;
+
+            // demonized: use whatever omni light visible by checking its parent
+            // normally it should be omnipart_num 0, but with omnipart_vischeck its not guaranteed, hope its stable
+            static xr_unordered_flat_set<light*> omni_parents;
+            omni_parents.clear();
 			for (u32 it = 0; it < source.size(); it++)
 			{
 				light* L = source[it];
+                light* parent = L->omipart_parent;
 
-				if (L->omnipart_num == 0 && L->range > 1.5f)
+				if ((L->omnipart_num == 0 || (parent && omni_parents.find(parent) == omni_parents.end())) && L->range > 1.5f)
 				{
+                    light* to_insert = L->omnipart_num == 0 ? L : parent;
+                    if (to_insert)
+                        omni_parents.insert(to_insert);
+
 					if (L->distance < 800 && L->flags.bActive)
 					{
 						L->distance_lpos = Device.vCameraPosition.distance_to(L->position);

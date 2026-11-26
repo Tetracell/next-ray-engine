@@ -6,6 +6,7 @@
 #include "../../xrEngine/igame_persistent.h"
 #include "../../xrEngine/environment.h"
 #include "../xrRender/fbasicvisual.h"
+#include "../../Include/xrRender/RenderVisual.h"
 #include "../../xrEngine/CustomHUD.h"
 #include "../../xrEngine/xr_object.h"
 #include "../../xrEngine/fmesh.h"
@@ -14,6 +15,7 @@
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "../xrRender/dxWallMarkArray.h"
 #include "../xrRender/dxUIShader.h"
+#include "../../xrCore/ShaderSourceCRC.h"
 //#include "../../xrServerEntities/smart_cast.h"
 
 #ifndef _EDITOR
@@ -233,7 +235,7 @@ IRenderVisual* CRender::model_CreateParticles(LPCSTR name)
 void CRender::models_Prefetch() { Models->Prefetch(); }
 void CRender::models_PrefetchOne(LPCSTR name, bool assert) { Models->Prefetch_One(name, assert); }
 void CRender::models_Clear(BOOL b_complete) { Models->ClearPool(b_complete); }
-bool CRender::models_Exists(LPCSTR name) { return Models->Exists(name); }
+bool CRender::models_Exists(LPCSTR name, bool no_prefetch) { return Models->Exists(name, no_prefetch); }
 
 ref_shader CRender::getShader(int id)
 {
@@ -373,6 +375,7 @@ void CRender::add_Occluder(Fbox2& bb_screenspace)
 
 void CRender::apply_object(IRenderable* O)
 {
+	RCache.bus_object.apply(O);
 	if (0 == O) return;
 	if (O->renderable_ROS())
 	{
@@ -530,6 +533,7 @@ void CRender::Render()
 
 	if (g_hud)
 	{
+		GMBase.r_dsgraph_render_ui();
 		g_hud->Render_R1_Attachment_UI();
 
 		if (g_hud->RenderActiveItemUIQuery())
@@ -568,6 +572,56 @@ void CRender::Render()
 
 	// HUD
 	Device.Statistic->RenderDUMP.End();
+}
+
+void CRender::RenderUI3DDirect()
+{
+	// Icons need independent depth: later world passes may still use the scene buffer.
+	// Query bound surfaces directly because an invalidated RCache may contain null pointers.
+	IDirect3DSurface9* saved_depth = nullptr;
+	const HRESULT depth_result = HW.pDevice->GetDepthStencilSurface(&saved_depth);
+	if (depth_result != D3DERR_NOTFOUND)
+		R_CHK(depth_result);
+	DWORD saved_z_enable;
+	R_CHK(HW.pDevice->GetRenderState(D3DRS_ZENABLE, &saved_z_enable));
+
+	D3DSURFACE_DESC color_desc;
+	IDirect3DSurface9* color_target = nullptr;
+	R_CHK(HW.pDevice->GetRenderTarget(0, &color_target));
+	R_CHK(color_target->GetDesc(&color_desc));
+	_RELEASE(color_target);
+	D3DFORMAT depth_format = HW.Caps.fDepth;
+	if (saved_depth)
+	{
+		D3DSURFACE_DESC depth_desc;
+		R_CHK(saved_depth->GetDesc(&depth_desc));
+		depth_format = depth_desc.Format;
+	}
+
+	// Recreate only when the UI target changes size, format or multisampling.
+	if (Target->ui_icons_depth)
+	{
+		D3DSURFACE_DESC desc;
+		R_CHK(Target->ui_icons_depth->GetDesc(&desc));
+		if (desc.Width != color_desc.Width || desc.Height != color_desc.Height ||
+			desc.Format != depth_format || desc.MultiSampleType != color_desc.MultiSampleType ||
+			desc.MultiSampleQuality != color_desc.MultiSampleQuality)
+			_RELEASE(Target->ui_icons_depth);
+	}
+	if (!Target->ui_icons_depth)
+		R_CHK(HW.pDevice->CreateDepthStencilSurface(color_desc.Width, color_desc.Height,
+			depth_format, color_desc.MultiSampleType, color_desc.MultiSampleQuality,
+			TRUE, &Target->ui_icons_depth, nullptr));
+
+	RCache.set_ZB(Target->ui_icons_depth);
+	R_CHK(HW.pDevice->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.f, 0));
+	// PassSET_ZB configures the comparison/writes, but does not enable depth testing.
+	RCache.set_Z(TRUE);
+	GMUI3D.r_dsgraph_render_ui_3d();
+	RCache.set_ZB(saved_depth);
+	_RELEASE(saved_depth);
+	RCache.set_Z(saved_z_enable);
+
 }
 
 void CRender::ApplyBlur4(FVF::TL4uv* pv, u32 w, u32 h, float k)
@@ -759,6 +813,7 @@ HRESULT CRender::shader_compile(
 	
 	D3DXMACRO defines [128];
 	int def_it = 0;
+	char c_shader_bus [32];
 
 	char sh_name[MAX_PATH] = "";
 	u32 len = 0;
@@ -832,6 +887,14 @@ HRESULT CRender::shader_compile(
 	sh_name[len] = '0' + char(4 == m_skinning);
 	++len;
 
+	// the bus version, in the cache name too so each version keeps its own build
+	xr_sprintf(c_shader_bus, "%d", ShaderBus::version());
+	defines[def_it].Name = "SHADER_BUS";
+	defines[def_it].Definition = c_shader_bus;
+	def_it ++;
+	xr_strcat(sh_name, c_shader_bus);
+	len += xr_strlen(c_shader_bus);
+
 	// finish
 	defines[def_it].Name = 0;
 	defines[def_it].Definition = 0;
@@ -856,7 +919,9 @@ HRESULT CRender::shader_compile(
 	FS.file_list(m_file_set, folder_name, FS_ListFiles | FS_RootOnly, "*");
 
 	string_path temp_file_name, file_name;
-	if (psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, m_file_set, temp_file_name))
+	bool const useGeneratedShaderCache =
+		psDeviceFlags2.test(rsPrecompiledShaders) || !match_shader_id(name, sh_name, m_file_set, temp_file_name);
+	if (useGeneratedShaderCache)
 	{
 		string_path file;
 		xr_strcpy(file, "shaders_cache\\r1\\");
@@ -873,13 +938,38 @@ HRESULT CRender::shader_compile(
 		xr_strcat(file_name, temp_file_name);
 	}
 
+	u32 source_crc = 0;
+	if (useGeneratedShaderCache)
+		source_crc = getShaderSourceCrc32(pSrcData, SrcDataLen, ::Render->getShaderPath());
+
 	if (FS.exist(file_name))
 	{
 		IReader* file = FS.r_open(file_name);
-		if (file->length() > 4)
+		if (useGeneratedShaderCache)
 		{
-			u32 crc = 0;
-			crc = file->r_u32();
+			if (file->length() > 8)
+			{
+				u32 const saved_source_crc = file->r_u32();
+				if (saved_source_crc == source_crc)
+				{
+					u32 const crc = file->r_u32();
+					u32 const real_crc = crc32(file->pointer(), file->elapsed());
+
+					if (real_crc == crc)
+					{
+						_result = create_shader(pTarget, (DWORD*)file->pointer(), file->elapsed(), file_name, result, o.disasm);
+					}
+				}
+				else
+				{
+                    Msg("~Shader cache source CRC mismatch for '%s': cached=0x%08x current=0x%08x, recompiling",
+                        name, saved_source_crc, source_crc);
+				}
+			}
+		}
+		else if (file->length() > 4)
+		{
+			u32 const crc = file->r_u32();
 
 			u32 const real_crc = crc32(file->pointer(), file->elapsed());
 
@@ -906,6 +996,9 @@ HRESULT CRender::shader_compile(
 			IWriter* file = FS.w_open(file_name);
 
 			u32 const crc = crc32(pShaderBuf->GetBufferPointer(), pShaderBuf->GetBufferSize());
+
+			if (useGeneratedShaderCache)
+				file->w_u32(source_crc);
 
 			file->w_u32(crc);
 			file->w(pShaderBuf->GetBufferPointer(), (u32)pShaderBuf->GetBufferSize());

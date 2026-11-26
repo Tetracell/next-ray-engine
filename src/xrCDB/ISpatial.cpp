@@ -24,6 +24,11 @@ Fvector c_spatial_offset [8] =
 	{1, 1, 1}
 };
 
+ICollidable* ISpatial::dcast_Collidable()
+{
+	return RawOwner ? RawOwner->dcast_Collidable() : nullptr;
+}
+
 CObject* ISpatial::dcast_CObject()
 {
 	return RawOwner ? RawOwner->dcast_CObject() : nullptr;
@@ -136,15 +141,16 @@ void ISpatial::Move()
 {
 	if (spatial.node_ptr)
 	{
-		//*** check if we are supposed to correct it's spatial location
-		if (spatial_inside())	
-			return;		// ???
+        xrSRWLockGuard guard(&spatial.space->db_lock, false);
+        if (spatial.node_ptr)
+        {
+            //*** check if we are supposed to correct it's spatial location
+            if (spatial_inside())
+                return;		// ???
 
-		xrSRWLockGuard guard(&spatial.space->db_lock, false);
-		if (!spatial.node_ptr)
-			return; // unregistered by another thread meanwhile
-		spatial.space->remove(this);
-		spatial.space->insert(this);
+            spatial.space->remove(this);
+            spatial.space->insert(this);
+        }
 	}
 	else
 	{

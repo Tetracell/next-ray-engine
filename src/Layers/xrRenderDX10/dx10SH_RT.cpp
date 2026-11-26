@@ -6,6 +6,7 @@
 #include "../xrRender/dxRenderDeviceRender.h"
 
 #include "dx10TextureUtils.h"
+#include "dx10DebugName.h"
 
 CRT::CRT()
 {
@@ -139,6 +140,7 @@ void CRT::create(LPCSTR Name, u32 w, u32 h, D3DFORMAT f, u32 SampleCount)
 #ifdef USE_DX12
 	pSurface->m_debug_name = Name; // r__dx12_trace
 #endif
+	dx10_set_debug_name(pSurface, Name);
 	// OK
 #ifdef DEBUG
 	Msg			("* created RT(%s), %dx%d, format = %d samples = %d",Name,w,h, dx10FMT, SampleCount );

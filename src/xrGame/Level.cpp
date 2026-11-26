@@ -338,6 +338,7 @@ CLevel::~CLevel()
     xr_delete(m_autosave_manager);
     xr_delete(m_debug_renderer);
     delete_data(m_debug_render_queue);
+    delete_data(m_debug_render_queue_immediate);
     if (!g_dedicated_server)
         ai().script_engine().remove_script_process(ScriptEngine::eScriptProcessorLevel);
     xr_delete(game);
@@ -708,7 +709,18 @@ void CLevel::ProcessSpawnEvents()
 			}
 		}
 
+		// Parent left the level while this spawn waited, so the item would drop where the parent stood
+		if (parent_id != 0xffff)
+		{
+			CObject* parent = Objects.net_Find(parent_id);
+			if (!parent || parent->getDestroy())
+				continue;
+		}
+
 		if (spawn_antifreeze_debug) Msg("[ProcessSpawnEvents] spawning section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
+
+        // If the object was in alife, but now its absent, skip it
+        auto spawn_data_it = spawn_events_data_copy.find(obj_id);
 
 		// demonized: If item is II_BOLT class - go through anyway
 		if (pSettings->line_exist(section.c_str(), "class") && strstr(pSettings->r_string(section.c_str(), "class"), "II_BOLT") != nullptr)
@@ -717,16 +729,14 @@ void CLevel::ProcessSpawnEvents()
 			goto spawn;
 		}
 
-        // If the object was in alife, but now its absent, skip it
-        auto spawn_data_it = spawn_events_data_copy.find(obj_id);
         if (spawn_data_it != spawn_events_data_copy.end())
         {
             if (spawn_data_it->second.hasAlifeObject)
             {
                 auto obj = ai().alife().objects().object(obj_id);
-                if (!obj || (was_deferred && !obj->m_bOnline))
+                if (!obj || !obj->m_bOnline)
                 {
-                    if (spawn_antifreeze_debug) Msg("![ProcessSpawnEvents] object was in alife, but now is not, do not spawn, section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
+                    if (spawn_antifreeze_debug) Msg("![ProcessSpawnEvents] object absent or offline, do not spawn, section %s, obj_id %d, parent_id %d, event_id %d", section.c_str(), obj_id, parent_id, dest);
                     continue;
                 }
             }
@@ -903,6 +913,19 @@ void CLevel::ProcessGameEvents()
 							continue;
 						}
 					}					
+
+					// A child spawned before its postponed parent would drop to the ground where the parent stands
+					if (parent_id != 0xffff && !Objects.net_Find(parent_id))
+					{
+						auto& E = data->E;
+						E.p = P;
+						E.id = obj_id;
+						E.hasAlifeObject = ai().alife().objects().object(obj_id, true) != nullptr;
+
+						events_to_prefetch.push_back(E);
+						it++; // Move to next event
+						continue;
+					}
 				}
 			}
 #endif
@@ -1038,6 +1061,12 @@ void CLevel::MakeReconnect()
 	}
 }
 
+void CLevel::SkipMusicTrack()
+{
+	if (m_level_sound_manager)
+		m_level_sound_manager->SkipMusicTrack();
+}
+
 BOOL mt_ph_commander = FALSE;
 BOOL mt_TaskManager = FALSE;
 extern BOOL psLua_ParallelGC;
@@ -1164,6 +1193,9 @@ void CLevel::OnFrame()
 		make_NetCorrectionPrediction();
 	if (!g_dedicated_server)
 	{
+		// the map update may run on the parallel thread so removals are reported to script from here
+		MapManager().FlushRemovedNotify();
+
 		if (g_mt_config.test(mtMap))
 			Device.seqParallel.push_back(xr_make_delegate(m_map_manager, &CMapManager::Update));
 		else
@@ -1300,7 +1332,16 @@ void CLevel::OnFrame()
 	}
 
 	for (auto& pair : m_script_attachments)
+    {
 		pair.second->Update();
+        pair.second->UpdateXFORM(nullptr, nullptr);
+    }
+
+	for (auto& light : g_pGamePersistent->ScriptLights)
+		light->Update();
+
+	for (auto& glow : g_pGamePersistent->ScriptGlows)
+		glow->Update();
 }
 
 int psLUA_GCSTEP = 300;
@@ -1488,6 +1529,16 @@ void CLevel::OnRender()
 
 	ScriptDebugRender();
 
+	for (u32 I = 0; I < Level().Objects.o_count(); I++)
+	{
+		CObject* _O = Level().Objects.o_get_by_iterator(I);
+		CGameObject* obj = smart_cast<CGameObject*>(_O);
+		if (obj) obj->DBGDrawPhysicsShell();
+	}
+
+	for (auto& pair : m_script_attachments)
+		pair.second->DBGDrawPhysicsShell();
+
 #ifdef DEBUG
     draw_wnds_rects();
     physics_world()->OnRender();
@@ -1597,7 +1648,7 @@ void CLevel::OnRender()
 
 void CLevel::ScriptDebugRender()
 {
-	if (!m_debug_render_queue.size())
+	if (!m_debug_render_queue.size() && !m_debug_render_queue_immediate.size())
 		return;
 
 	bool hasVisibleObj = false;
@@ -1610,6 +1661,19 @@ void CLevel::ScriptDebugRender()
 			hasVisibleObj = true;
 			obj->Render();
 		}
+	}
+
+	if (m_debug_render_queue_immediate.size())
+    {
+        hasVisibleObj = true;
+
+        for (auto& obj : m_debug_render_queue_immediate)
+        {
+            obj->Render();
+            xr_delete(obj);
+        }
+
+        m_debug_render_queue_immediate.clear_and_free();
 	}
 
 	// demonized: fix of showing console window when there are no visible gizmos 
@@ -1937,6 +2001,7 @@ void CLevel::OnAlifeSimulatorUnLoaded()
 	MapManager().ResetStorage();
 	GameTaskManager().ResetStorage();
 	delete_data(m_debug_render_queue);
+	delete_data(m_debug_render_queue_immediate);
 }
 
 void CLevel::OnAlifeSimulatorLoaded()
@@ -1944,6 +2009,7 @@ void CLevel::OnAlifeSimulatorLoaded()
 	MapManager().ResetStorage();
 	GameTaskManager().ResetStorage();
 	delete_data(m_debug_render_queue);
+	delete_data(m_debug_render_queue_immediate);
 }
 
 void CLevel::OnSessionTerminate(LPCSTR reason)

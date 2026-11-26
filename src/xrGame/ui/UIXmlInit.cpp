@@ -21,7 +21,9 @@
 #include "UIDragDropListEx.h"
 #include "UIDragDropReferenceList.h"
 #include "UItabButtonMP.h"
+#include "UITabScrollArrows.h"
 #include "UILines.h"
+#include "UI3dStatic.h"
 
 extern int keyname_to_dik(LPCSTR);
 
@@ -159,6 +161,9 @@ bool CUIXmlInit::InitStatic(CUIXml& xml_doc, LPCSTR path,
 	InitTexture(xml_doc, path, index, pWnd);
 	InitTextureOffset(xml_doc, path, index, pWnd);
 
+	bool cover_flag = xml_doc.ReadAttribInt(path, index, "cover", 0) ? true : false;
+	pWnd->SetCoverTexture(cover_flag);
+
 	int flag = xml_doc.ReadAttribInt(path, index, "heading", 0);
 	pWnd->EnableHeading((flag) ? true : false);
 
@@ -184,6 +189,57 @@ bool CUIXmlInit::InitStatic(CUIXml& xml_doc, LPCSTR path,
 
 	pWnd->SetColorAnimation(str_flag, flags);
 
+
+	str_flag = xml_doc.ReadAttrib(path, index, "xform_anim", "");
+	flag_cyclic = xml_doc.ReadAttribInt(path, index, "xform_anim_cyclic", 1);
+
+	pWnd->SetXformLightAnim(str_flag, (flag_cyclic) ? true : false);
+
+	bool bComplexMode = xml_doc.ReadAttribInt(path, index, "complex_mode", 0) ? true : false;
+	if (bComplexMode)
+		pWnd->TextItemControl()->SetTextComplexMode(bComplexMode);
+
+	pWnd->m_stat_hint_text = xml_doc.ReadAttrib(path, index, "hint", "");
+
+	return true;
+}
+
+bool CUIXmlInit::Init3dStatic(CUIXml& xml_doc, LPCSTR path,
+	int index, CUI3dStatic* pWnd)
+{
+	R_ASSERT4(xml_doc.NavigateToNode(path, index), "XML node not found", path, xml_doc.m_xml_file_name);
+
+	InitWindow(xml_doc, path, index, pWnd);
+
+	string256 buf;
+	InitText(xml_doc, strconcat(sizeof(buf), buf, path, ":text"), index, pWnd);
+	InitTexture(xml_doc, path, index, pWnd);
+	InitTextureOffset(xml_doc, path, index, pWnd);
+
+	int flag = xml_doc.ReadAttribInt(path, index, "heading", 0);
+	pWnd->EnableHeading((flag) ? true : false);
+
+	float heading_angle = xml_doc.ReadAttribFlt(path, index, "heading_angle", 0.0f);
+	if (!fis_zero(heading_angle))
+	{
+		pWnd->EnableHeading(true);
+		pWnd->SetConstHeading(true);
+		pWnd->SetHeading(deg2rad(heading_angle));
+	}
+
+	LPCSTR str_flag = xml_doc.ReadAttrib(path, index, "light_anim", "");
+	int flag_cyclic = xml_doc.ReadAttribInt(path, index, "la_cyclic", 1);
+	int flag_text = xml_doc.ReadAttribInt(path, index, "la_text", 1);
+	int flag_texture = xml_doc.ReadAttribInt(path, index, "la_texture", 1);
+	int flag_alpha = xml_doc.ReadAttribInt(path, index, "la_alpha", 0);
+
+	u8 flags = 0;
+	if (flag_cyclic) flags |= LA_CYCLIC;
+	if (flag_alpha) flags |= LA_ONLYALPHA;
+	if (flag_text) flags |= LA_TEXTCOLOR;
+	if (flag_texture) flags |= LA_TEXTURECOLOR;
+
+	pWnd->SetColorAnimation(str_flag, flags);
 
 	str_flag = xml_doc.ReadAttrib(path, index, "xform_anim", "");
 	flag_cyclic = xml_doc.ReadAttribInt(path, index, "xform_anim_cyclic", 1);
@@ -816,6 +872,15 @@ bool CUIXmlInit::InitFont(CUIXml& xml_doc, LPCSTR path, int index, u32& color, C
 	return true;
 }
 
+static float AnchorFactor(LPCSTR align, LPCSTR lead, LPCSTR trail)
+{
+	if (0 == xr_strcmp(align, lead))
+		return 0.0f;
+	if (0 == xr_strcmp(align, trail))
+		return 1.0f;
+	return 0.5f;
+}
+
 bool CUIXmlInit::InitTabControl(CUIXml& xml_doc, LPCSTR path, int index, CUITabControl* pWnd)
 {
 	R_ASSERT4(xml_doc.NavigateToNode(path,index), "XML node not found", path, xml_doc.m_xml_file_name);
@@ -830,6 +895,19 @@ bool CUIXmlInit::InitTabControl(CUIXml& xml_doc, LPCSTR path, int index, CUITabC
 	XML_NODE* tab_node = xml_doc.NavigateToNode(path, index);
 	xml_doc.SetLocalRoot(tab_node);
 
+	// Optional icon slot shared by every tab: width/height cap the icon size, the per-tab <icon> art
+	// being fitted inside with aspect kept; align/vert_align snap the fitted icon's own anchor point
+	// onto the same point of the tab, and x/y offset it from there. Every default centres, so a strip
+	// declaring no slot needs no special case here. Must be read before the first SetTabIcon.
+	Fvector2 icon_pos, icon_box, icon_anchor;
+	icon_pos.set(xml_doc.ReadAttribFlt("icon_layout", 0, "x", 0.0f),
+	             xml_doc.ReadAttribFlt("icon_layout", 0, "y", 0.0f));
+	icon_box.set(xml_doc.ReadAttribFlt("icon_layout", 0, "width", 0.0f),
+	             xml_doc.ReadAttribFlt("icon_layout", 0, "height", 0.0f));
+	icon_anchor.set(AnchorFactor(xml_doc.ReadAttrib("icon_layout", 0, "align", ""), "l", "r"),
+	                AnchorFactor(xml_doc.ReadAttrib("icon_layout", 0, "vert_align", ""), "t", "b"));
+	pWnd->SetIconLayout(icon_pos, icon_box, icon_anchor);
+
 	CUITabButton* newButton;
 
 	for (int i = 0; i < tabsCount; ++i)
@@ -839,6 +917,36 @@ bool CUIXmlInit::InitTabControl(CUIXml& xml_doc, LPCSTR path, int index, CUITabC
 		newButton->m_btn_id = xml_doc.ReadAttrib("button", i, "id");
 		R_ASSERT3(newButton->m_btn_id.size(), xml_doc.m_xml_file_name, path);
 		pWnd->AddItem(newButton);
+
+		LPCSTR icon = xml_doc.Read("button:icon", i, NULL);
+		if (icon && !pWnd->SetTabIcon(newButton->m_btn_id.c_str(), icon))
+			Msg("! [%s] tab [%s]: <icon> art [%s] not found", xml_doc.m_xml_file_name,
+			    newButton->m_btn_id.c_str(), icon);
+	}
+
+	// Optional skin-authored scroll arrows, written as plain buttons. A non-zero x or y pins that axis
+	// where the skin put it, zero leaves it to the strip; a node without its own <text> stays glyphless,
+	// the art being the arrow itself.
+	static const LPCSTR arrow_node[2] = {"arrow_left", "arrow_right"};
+	for (int s = 0; s < 2; ++s)
+	{
+		if (!xml_doc.NavigateToNode(arrow_node[s], 0))
+			continue;
+
+		CUIScrollArrowButton* arrow = xr_new<CUIScrollArrowButton>();
+		status &= Init3tButton(xml_doc, arrow_node[s], 0, arrow);
+
+		LPCSTR glyph = arrow->TextItemControl()->GetText();
+		const bool sized = arrow->GetWndSize().x > 0.0f && arrow->GetWndSize().y > 0.0f;
+		const bool faced = arrow->m_bTextureEnable || (glyph && xr_strlen(glyph));
+		if (sized && faced)
+			pWnd->SetScrollArrow(s, arrow);
+		else
+		{
+			Msg("! [%s] <%s> needs a positive width/height and a texture or text, ignored",
+				xml_doc.m_xml_file_name, arrow_node[s]);
+			xr_delete(arrow);
+		}
 	}
 
 	xml_doc.SetLocalRoot(xml_doc.GetRoot());
@@ -1042,8 +1150,7 @@ bool CUIXmlInit::InitMultiTexture(CUIXml& xml_doc, LPCSTR path, int index, CUI3t
 		}
 		else if (pWnd->m_back_frameline)
 		{
-			pWnd->m_back_frameline->InitState(S_Enabled, texture.c_str());
-			pWnd->m_back_frameline->Get(S_Enabled)->SetHorizontal(!(pWnd->vertical));
+			pWnd->m_back_frameline->InitState(S_Enabled, texture.c_str(), pWnd->vertical);
 		}
 		else if (pWnd->m_back_framewindow)
 		{
@@ -1062,8 +1169,7 @@ bool CUIXmlInit::InitMultiTexture(CUIXml& xml_doc, LPCSTR path, int index, CUI3t
 		}
 		else if (pWnd->m_back_frameline)
 		{
-			pWnd->m_back_frameline->InitState(S_Touched, texture.c_str());
-			pWnd->m_back_frameline->Get(S_Touched)->SetHorizontal(!(pWnd->vertical));
+			pWnd->m_back_frameline->InitState(S_Touched, texture.c_str(), pWnd->vertical);
 		}
 		else if (pWnd->m_back_framewindow)
 		{
@@ -1082,8 +1188,7 @@ bool CUIXmlInit::InitMultiTexture(CUIXml& xml_doc, LPCSTR path, int index, CUI3t
 		}
 		else if (pWnd->m_back_frameline)
 		{
-			pWnd->m_back_frameline->InitState(S_Disabled, texture.c_str());
-			pWnd->m_back_frameline->Get(S_Disabled)->SetHorizontal(!(pWnd->vertical));
+			pWnd->m_back_frameline->InitState(S_Disabled, texture.c_str(), pWnd->vertical);
 		}
 		else if (pWnd->m_back_framewindow)
 		{
@@ -1102,8 +1207,7 @@ bool CUIXmlInit::InitMultiTexture(CUIXml& xml_doc, LPCSTR path, int index, CUI3t
 		}
 		else if (pWnd->m_back_frameline)
 		{
-			pWnd->m_back_frameline->InitState(S_Highlighted, texture.c_str());
-			pWnd->m_back_frameline->Get(S_Highlighted)->SetHorizontal(!(pWnd->vertical));
+			pWnd->m_back_frameline->InitState(S_Highlighted, texture.c_str(), pWnd->vertical);
 		}
 		else if (pWnd->m_back_framewindow)
 		{

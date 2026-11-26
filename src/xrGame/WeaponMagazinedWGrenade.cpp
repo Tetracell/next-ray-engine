@@ -210,6 +210,7 @@ bool CWeaponMagazinedWGrenade::SwitchMode(bool force)
 }
 
 extern BOOL useSeparateUBGLKeybind;
+extern BOOL g_launcher_dynamic_range_zoom;
 void CWeaponMagazinedWGrenade::PerformSwitchGL()
 {
 	m_bGrenadeMode = !m_bGrenadeMode;
@@ -428,7 +429,7 @@ void CWeaponMagazinedWGrenade::LaunchGrenade()
 
 		launch_matrix.c.set(p1);
 
-		if (IsGameTypeSingle() && IsZoomed() && smart_cast<CActor*>(H_Parent()))
+		if (IsGameTypeSingle() && IsZoomed() && smart_cast<CActor*>(H_Parent()) && g_launcher_dynamic_range_zoom)
 		{
 			H_Parent()->setEnabled(FALSE);
 			setEnabled(FALSE);
@@ -664,6 +665,9 @@ bool CWeaponMagazinedWGrenade::Detach(LPCSTR item_section_name, bool b_spawn_ite
 
 void CWeaponMagazinedWGrenade::InitAddons()
 {
+	if (!m_bUseEngineAttachments)
+		return;
+
 	inherited::InitAddons();
 
 	if (GrenadeLauncherAttachable())
@@ -1079,7 +1083,9 @@ u8 CWeaponMagazinedWGrenade::GetCurrentHudOffsetIdx()
 	bool b_aiming = ((IsZoomed() && m_zoom_params.m_fZoomRotationFactor <= 1.f) ||
 		(!IsZoomed() && m_zoom_params.m_fZoomRotationFactor > 0.f));
 
-	if (Actor()->is_safemode())
+	if (m_bHandleCustomHudOffset)
+		return 8;
+	else if (Actor()->is_safemode())
 		return 4;
 	else if (!IsZoomed())
 		return 0;

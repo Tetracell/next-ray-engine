@@ -18,10 +18,13 @@ light::light()
 	flags.bVolumetric = false;
 	flags.bHudMode = false;
 	flags.bOccq = true;
-
-	position.set(0, -1000, 0);
-	direction.set(0, -1, 0);
-	right.set(0, 0, 0);
+	flags.bOrtho = false;
+	position_internal.set(0, -1000, 0);
+	position.set(position_internal);
+	direction_internal.set(0, -1, 0);
+	direction.set(direction_internal);
+	right_internal.set(0, 0, 0);
+	right.set(right_internal);
 	range = 8.f;
 	cone = deg2rad(60.f);
 	color.set(1, 1, 1, 1);
@@ -50,7 +53,6 @@ light::light()
 	CHK_DX(CreateQuery(&vis.Q, D3DQUERYTYPE_OCCLUSION));
 	vis.visible = true;
 	vis.pending = false;
-	vis.query_active = false;
 	m_sectors = {};
 	X.S.posX = 0;
 	X.S.posY = 0;
@@ -142,6 +144,26 @@ void light::set_texture(LPCSTR name)
 }
 #endif
 
+void light::set_hud_mode(bool b)
+{
+	bool prev = !!flags.bHudMode;
+	if (prev == b) return;
+	flags.bHudMode = b;
+
+	if (b)
+	{
+		position.hud_to_world();
+		direction.hud_to_world_dir();
+		right.hud_to_world_dir();
+	}
+	else
+	{
+		position.set(position_internal);
+		direction.set(direction_internal);
+		right.set(right_internal);
+	}
+}
+
 void light::set_active(bool a)
 {
 	if (a)
@@ -173,10 +195,10 @@ void light::set_active(bool a)
 
 void light::set_position(const Fvector& P, const float eps)
 {
-	if (position.similar(P, eps))
-		return;
-
-	position.set(P);
+	if (position_internal.similar(P, eps))return;
+	position_internal.set(P);
+	position.set(position_internal);
+	if (get_hud_mode()) position.hud_to_world();
 	spatial_move();
 }
 
@@ -203,12 +225,17 @@ void light::set_cone(float angle)
 
 void light::set_rotation(const Fvector& D, const Fvector& R, const float eps)
 {
-	Fvector old_D = direction;
-	direction.normalize(D);
-	right.normalize(R);
-
-	if (!fsimilar(1.f, old_D.dotproduct(D), eps)) 
-		spatial_move();
+	Fvector old_D = direction_internal;
+	direction_internal.normalize(D);
+	right_internal.normalize(R);
+	direction.set(direction_internal);
+	right.set(right_internal);
+	if (get_hud_mode())
+	{
+		direction.hud_to_world_dir();
+		right.hud_to_world_dir();
+	}
+	if (!fsimilar(1.f, old_D.dotproduct(D), eps)) spatial_move();
 }
 
 //								+X,				-X,				+Y,				-Y,			+Z,				-Z
@@ -473,7 +500,10 @@ void light::xform_calc()
             tan_shift = 0.0610865f; //deg2rad(3.5f);
 #endif
         /* Ray Twitty end */
-		X.S.project.build_projection(cone + tan_shift, 1.f, virtual_size, range + EPS_S);
+		if (flags.bOrtho)
+			X.S.project.build_projection_ortho(cone + tan_shift, cone + tan_shift, virtual_size, range + EPS_S);
+		else
+			X.S.project.build_projection(cone + tan_shift, 1.f, virtual_size, range + EPS_S);
 
 		X.S.combine.mul(X.S.project,X.S.view);
 
@@ -593,7 +623,7 @@ void light::export_()
 						L->vis.pending = vis.pending;
 						L->vis.visible = vis.visible;
 					}
-					if (L->vis.pending)
+					if (L->vis.pending && !L->vis.visible)
 						RImplementation.LP_pending.v_shadowed.push_back(L);
 					else
 						RImplementation.LP_normal.v_shadowed.push_back(L);
@@ -605,7 +635,7 @@ void light::export_()
 				this->set_volumetric_intensity(m_volumetric_intensity);
 				vis_prepare();
 
-				if (vis.pending)
+				if (vis.pending && !vis.visible)
 					RImplementation.LP_pending.v_shadowed.push_back(this);
 				else
 					RImplementation.LP_normal.v_shadowed.push_back(this);
@@ -620,7 +650,7 @@ void light::export_()
 			case IRender_Light::POINT:
 				{
 					vis_prepare();
-					if (vis.pending)
+					if (vis.pending && !vis.visible)
 						RImplementation.LP_pending.v_point.push_back(this);
 					else
 						RImplementation.LP_normal.v_point.push_back(this);
@@ -629,7 +659,7 @@ void light::export_()
 			case IRender_Light::SPOT:
 				{
 					vis_prepare();
-					if (vis.pending)
+					if (vis.pending && !vis.visible)
 						RImplementation.LP_pending.v_spot.push_back(this);
 					else
 						RImplementation.LP_normal.v_spot.push_back(this);				

@@ -401,10 +401,8 @@ void CUILines::Draw(float x, float y)
 		text_pos.set(0, 0);
 
 		text_pos.x = x + GetIndentByAlign();
-		//		text_pos.y = y + GetVIndentByAlign();
-		text_pos.y = y;
+		text_pos.y = y + GetVIndentByAlign();
 		UI().ClientToScreenScaled(text_pos);
-		text_pos.y += GetVIndentByAlign();
 
 		if (uFlags.test(flPasswordMode))
 		{
@@ -514,9 +512,16 @@ u32 CUILines::GetColorFromText(const xr_string& str) const
 	end = str.find(END, begin);
 	if (begin == npos || end == npos)
 		return m_dwTextColor;
-	// try default color
-	if (npos != str.find("%c[default]", begin, end - begin))
-		return m_dwTextColor;
+	// try default color. find()'s third argument is how many characters of the needle to use, so the
+	// old find("%c[default]", begin, end - begin) read past the 12-byte literal for any tag longer than
+	// it, e.g. %c[0,250,250,250] (ASAN global-buffer-overflow). Same match as before, bounded to the
+	// literal: the tag's text up to ']' is a prefix of "%c[default" (a longer tag never matched it)
+	{
+		static const char default_tag[] = "%c[default]";
+		const StrSize tag_len = end - begin;
+		if (tag_len < sizeof(default_tag) && npos != str.find(default_tag, begin, tag_len))
+			return m_dwTextColor;
+	}
 
 	// Try predefined in XML colors
 	for (CUIXmlInit::ColorDefs::const_iterator it = CUIXmlInit::GetColorDefs()->begin(); it != CUIXmlInit::

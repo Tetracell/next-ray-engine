@@ -74,7 +74,7 @@ static bool scope_lenses_draw_late()
 
 void CRenderTarget::phase_combine()
 {
-	PIX_EVENT(phase_combine);
+	PIX_EVENT_C(phase_combine, dx10_marker_combine);
     PROF_EVENT("phase_combine");
 	
 	bool ssfx_PrevPos_Requiered = false;
@@ -226,7 +226,7 @@ void CRenderTarget::phase_combine()
 	// Draw full-screen quad textured with our scene image
 	if (!_menu_pp)
 	{
-		PIX_EVENT(combine_1);
+		PIX_EVENT_C(combine_1, dx10_marker_combine);
 		// Compute params
 		CEnvDescriptorMixer& envdesc = *g_pGamePersistent->Environment().CurrentEnv;
 		const float minamb = 0.001f;
@@ -371,6 +371,7 @@ void CRenderTarget::phase_combine()
 
 	if (RImplementation.o.ssfx_ssr && !Device.m_SecondViewport.IsSVPFrame())
 	{
+		PIX_EVENT(phase_ssfx_ssr);
 		ssfx_PrevPos_Requiered = true;
 		{ PIX_EVENT(phase_ssfx_ssr); phase_ssfx_ssr(); } // [SSFX] - New SSR Phase
 	}
@@ -678,7 +679,7 @@ void CRenderTarget::phase_combine()
 
 	if (1)
 	{
-		PIX_EVENT(combine_2);
+		PIX_EVENT_C(combine_2, dx10_marker_combine);
 		// 
 		struct v_aa
 		{
@@ -813,7 +814,7 @@ void CRenderTarget::phase_combine()
 	//	PP-if required
 	if (PP_Complex)
 	{
-		PIX_EVENT(phase_pp);
+		PIX_EVENT_C(phase_pp, dx10_marker_post);
 		phase_pp();
 	}
 

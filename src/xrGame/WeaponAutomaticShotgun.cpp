@@ -48,7 +48,7 @@ void CWeaponAutomaticShotgun::Load(LPCSTR section)
 
 bool CWeaponAutomaticShotgun::Action(u16 cmd, u32 flags)
 {
-    if (cmd == kWPN_FIRE && GetState() == eReload) // ver
+    if (cmd == kWPN_FIRE && flags & CMD_START && GetState() == eReload) // ver
     {
         ClickInterruptFlag = true; // ver
     }
@@ -276,14 +276,15 @@ bool CWeaponAutomaticShotgun::HaveCartridgeInInventory(u8 cnt)
 }
 
 
-void CWeaponAutomaticShotgun::OnMotionMark(u32 state, const motion_marks& M)
+void CWeaponAutomaticShotgun::OnMotionMark(u32 state, const motion_marks& M, float mark_start, float mark_end)
 {
     // edited by Verdatim 18.4.2026
     // changed to allow motion marks on automatic shotgun reloads
     // what the fuckkkk
 
     //Msg("motion mark detected on reload!");
-    inherited::OnMotionMark(state, M);
+    inherited::OnMotionMark(state, M, mark_start, mark_end);
+    
     if (state == eIdle)
     {
         bMisfire = false;
@@ -293,9 +294,8 @@ void CWeaponAutomaticShotgun::OnMotionMark(u32 state, const motion_marks& M)
         return;
     }
 
-
-
-    if ((m_sub_state == eSubstateReloadInProcess || m_sub_state == eSubstateReloadBegin) && (state == eReload))
+    shared_str reloadMarkName = READ_IF_EXISTS(pSettings, r_string, cNameSect(), "motion_mark_reload", "");
+    if ((m_sub_state == eSubstateReloadInProcess || m_sub_state == eSubstateReloadBegin) && (state == eReload) && (reloadMarkName.size() == 0 || reloadMarkName == M.name))
     {
         AddCartridge(1);
         m_sub_state = eSubstateReloadBegin;
@@ -304,12 +304,11 @@ void CWeaponAutomaticShotgun::OnMotionMark(u32 state, const motion_marks& M)
     }
     //SwitchState(eReload);
 
-
 }
 
 u8 CWeaponAutomaticShotgun::AddCartridge(u8 cnt)
 {
-	//if (IsMisfire()) bMisfire = false;
+	if (IsMisfire()) bMisfire = false;
 
 	if (m_set_next_ammoType_on_reload != undefined_ammo_type)
 	{

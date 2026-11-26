@@ -167,6 +167,10 @@ public:
 
 	ref_rt rt_dof;
 	ref_rt rt_ui_pda;
+	ref_rt rt_ui_3d_icons;
+	ref_rt rt_ui_3d_icons_raw;
+	ref_rt rt_ui_3d_icons_raw_msaa;
+	ref_rt rt_ui_3d_icons_depth;
 
 	// Upscaler (DLSS / FSR)
 	ref_rt rt_upscale_depth;  // scene depth/stencil at render resolution, readable by the upscaler
@@ -410,6 +414,8 @@ public:
 	ref_geom g_postprocess;
 	ref_shader s_menu;
 	ref_geom g_menu;
+	ref_shader s_ui_icons[6];
+	ref_shader s_ui_3d_icons_postprocess;
 private:
 	float im_noise_time;
 	u32 im_noise_shift_w;
@@ -562,6 +568,7 @@ public:
 	void phase_luminance();
 	void phase_combine();
 	void phase_combine_volumetric();
+	void phase_ui_3d_icons_postprocess();
 	void phase_pp();
 
 	// Upscaler: the 3D scene renders at upscale_render_width() x upscale_render_height() and is upscaled before phase_pp.
