@@ -60,8 +60,38 @@ Cherry-picked from [themrdemonized/xray-monolith](https://github.com/themrdemoni
 - **Memory** (`b1e6e7988`, from `6a93fc679`): a block that `realloc` shrank in place and then grew again could hand back
   stale bytes where zeros were promised. That tail is now cleared.
 
+### Texture streaming is off by default
+
+Texture streaming is one of neXt-Ray's biggest features (see [Texture streaming](#texture-streaming) further down): world
+textures load small first, and each one loads at full size in the background the first time it's drawn. At full texture
+quality that uses about 2.5 times less video memory. **In this fork it's turned off by default for now, because it's
+causing crashes:**
+
+- **DX12 (`AnomalyDX12AVX.exe`):** a crash while loading a save, reproducible with GAMMA. The crash is heap corruption
+  (`0xc0000374` in `ntdll.dll`): something writes into memory it doesn't own. Windows ends the game on the spot, so the
+  engine's crash handler never runs, and there's no crash report, only an entry in the Windows event log. The bad write
+  hasn't been found yet. The streaming code and the DX12 texture loader were read without finding it, so the next step is
+  a crash dump.
+- **DX11 (`AnomalyDX11AVX.exe`):** streaming is also the main suspect, not proven, for crashes inside NVIDIA's driver
+  (`nvwgf2umx.dll`), on the driver's own worker threads, a few hundred frames after a save loads. Streaming creates
+  full-size textures on a background thread while the game renders, which the stock engine never does.
+
+Streaming saves video memory. It doesn't make the game faster. With streaming off, the game needs as much video memory
+as GAMMA's own engine does: the comparison further down measured 9.89 GB at full texture quality in one location. On a
+card with less than that, lower the texture quality, or turn streaming on and accept the risk.
+
+**To turn it on anyway:** open the console (`~`), enter `r4_tex_stream 1`, then load a save. The setting is read when
+textures load, so it only takes effect at the next level load. It's saved in `appdata\user.ltx`. To turn it off again,
+enter `r4_tex_stream 0` and load a save. If you get a crash with it on, a report is very welcome. A crash dump helps
+most: Windows can be set to keep one with
+[WER LocalDumps](https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps).
+
+The default changed in `dx10SH_Texture.cpp` (`ps_r4_tex_stream = 0`). Your own `user.ltx` overrides it, so if you used
+neXt-Ray before and never changed the setting, it may still say `r4_tex_stream 1` there.
+
 ### Known issues
 
+- **Texture streaming crashes:** see [above](#texture-streaming-is-off-by-default); off by default.
 - **Red dot / reflex sights show no reticle without a shader override.** Upstream's "Fix SSS Bloom" (`a07386981`) removed
   the lens rendering errors, but not this.
 - **Night vision can flicker** between a soft, dark look and a bright, sharp one with DLSS/FSR on. Workaround:

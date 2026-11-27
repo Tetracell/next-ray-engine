@@ -30,7 +30,9 @@ void fix_texture_name(LPSTR fn);
 // thread between frames) the small one is drawn, so nothing waits. One not bound for r4_tex_stream_keep seconds goes
 // back to its small version. Anything that asks for a streamed texture's surface or size gets it whole for good.
 // Measured on the Steam Deck: ~0.5 GB of GAMMA's ~2.4 GB of textures were bound in a minute of play
-int ps_r4_tex_stream = 1; // read when textures load
+// Off by default in this fork: on DX12 it crashes with heap corruption (0xc0000374) while loading a save, not yet found.
+// See README, "Texture streaming is off by default"
+int ps_r4_tex_stream = 0; // read when textures load
 int ps_r4_tex_stream_keep = 60;
 extern xr_task_group textures_load_tasks;
 extern thread_local int g_texture_load_skip;
