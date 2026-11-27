@@ -240,6 +240,7 @@ private:
 public:
 	IRender_Sector* rimp_detectSector(Fvector& P, Fvector& D);
 	void render_forward();
+	void render_hud_ui_upscaled(); // the HUD UI before the late screen overlays (phase_upscale)
 	void render_Reticle();
 	void render_smap_direct(Fmatrix& mCombined);
 	void render_indirect(light* L);

@@ -583,6 +583,7 @@ public:
 	void phase_upscale();
 	void upscale_hud_ui_depth();
 	void phase_pda_upscaled();
+	void phase_hud_ui_upscaled(bool item_ui, bool cam_ui); // CRender::render_hud_ui_upscaled
 
 	virtual void set_blur(float f) { param_blur = f; }
 	virtual void set_gray(float f) { param_gray = f; }

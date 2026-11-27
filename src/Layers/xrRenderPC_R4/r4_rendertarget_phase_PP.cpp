@@ -669,6 +669,38 @@ void CRenderTarget::phase_pda_upscaled()
 	RImplementation.GMBase.r_dsgraph_render_PDALate();
 }
 
+// The HUD UI onto the upscaled image before the late screen overlays (CRender::render_hud_ui_upscaled): depth tested
+// against the scene's depth scaled up as for the PDA screen, at the output's size (screen_res, as at the end of the
+// frame) and without the scene's jitter (the upscaler has resolved it)
+void CRenderTarget::phase_hud_ui_upscaled(bool item_ui, bool cam_ui)
+{
+	const u32 ow = m_upscale_output_w, oh = m_upscale_output_h;
+	upscale_lens_depth::build(rt_upscale_lens_depth->pZRT, rt_upscale_depth->pSurface, m_upscale_render_w, m_upscale_render_h, ow, oh);
+	RCache.OnFrameEnd();
+
+	const u32 render_w = Device.dwRenderWidth, render_h = Device.dwRenderHeight;
+	const bool jitter = RImplementation.upscale_jitter_on;
+	RImplementation.upscale_jitter_on = false;
+	Device.dwRenderWidth = ow;
+	Device.dwRenderHeight = oh;
+	RCache.constants_epoch++;
+
+	u_setrt(ow, oh, rt_upscale_output->pRT, NULL, NULL, rt_upscale_lens_depth->pZRT);
+	RCache.set_CullMode(CULL_CCW);
+	RCache.set_Stencil(FALSE);
+	RCache.set_ColorWriteEnable();
+	RImplementation.rmNormal();
+	if (item_ui)
+		RImplementation.GMBase.r_dsgraph_render_hud_ui();
+	if (cam_ui)
+		RImplementation.GMBase.r_dsgraph_render_cam_ui();
+
+	Device.dwRenderWidth = render_w;
+	Device.dwRenderHeight = render_h;
+	RCache.constants_epoch++;
+	RImplementation.upscale_jitter_on = jitter;
+}
+
 // The HUD UI (detector screens, script HUD attachments) draws after the upscaler over the output image, depth tested
 // against HW.pBaseZB at output resolution. The scene's depth went to rt_upscale_depth at render resolution and nothing
 // cleared HW.pBaseZB, so the test failed and the Svarog/Veles screens showed no artefacts or anomalies (PC test). Before
@@ -800,7 +832,12 @@ void CRenderTarget::phase_upscale()
 		if (m_overlays_after_upscale)
 		{
 			if (m_upscale_done)
+			{
+				// The HUD UI goes under them, as without an upscaler (it would lie over the night vision)
+				if (ps_r2_mask_control.x > 0 || ps_r2_nightvision > 0 || scope_fake_enabled)
+					RImplementation.render_hud_ui_upscaled();
 				phase_screen_overlays_upscaled();
+			}
 			else
 				phase_screen_overlays();
 			m_overlays_after_upscale = false;

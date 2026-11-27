@@ -93,8 +93,25 @@ namespace
 	CSector* s_freeze_sector = nullptr;
 }
 
-// The item and camera attachment UI was drawn this frame in render_forward (no upscaler)
+// The item and camera attachment UI was drawn this frame: in render_forward (no upscaler) or by render_hud_ui_upscaled
 static bool s_hud_ui_drawn = false;
+
+// With an upscaler the item and camera attachment UI (detector screens, script HUD attachments such as a wrist watch)
+// draws after it, at output resolution. Drawn at the end of the frame it lay over the night vision, gas mask and fake
+// scope overlays that also run after the upscaler (phase_screen_overlays_upscaled): untouched by night vision, unlike
+// without an upscaler. While one of them is on it draws here instead, onto the upscaled image before them, depth tested
+// against the scene's depth scaled up as for the late PDA screen, without the scene's jitter and at the output's size
+void CRender::render_hud_ui_upscaled()
+{
+	if (!g_hud || s_hud_ui_drawn || !Target->rt_upscale_lens_depth._get())
+		return;
+	const bool item_ui = g_hud->RenderActiveItemUIQuery();
+	const bool cam_ui = g_hud->RenderCamAttachedUIQuery();
+	s_hud_ui_drawn = true;
+	if (!item_ui && !cam_ui)
+		return;
+	Target->phase_hud_ui_upscaled(item_ui, cam_ui);
+}
 
 void CRender::Render()
 {
