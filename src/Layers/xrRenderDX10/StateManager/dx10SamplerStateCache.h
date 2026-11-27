@@ -48,6 +48,11 @@ private:
 	{
 		u32 m_crc;
 		IDeviceState* m_pState;
+		// The state for the settings before the last SetMaxAnisotropyAndMipLODBias: the upscaler switches the scene's
+		// mip bias on and off every frame, and each switch rebuilt every sampler state (brodrigz/xray-monolith 777c5220d)
+		IDeviceState* m_pAlternateState = nullptr;
+		u32 m_alternateAniso = 0;
+		float m_alternateMipLODBias = 0.0f;
 	};
 
 private:

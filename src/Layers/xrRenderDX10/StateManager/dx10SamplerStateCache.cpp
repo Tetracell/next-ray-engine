@@ -2,6 +2,7 @@
 #include "dx10SamplerStateCache.h"
 
 #include "../dx10StateUtils.h"
+#include <utility>
 
 using dx10StateUtils::operator==;
 
@@ -84,6 +85,7 @@ void dx10SamplerStateCache::ClearStateArray()
 	for (u32 i = 0; i < m_StateArray.size(); ++i)
 	{
 		_RELEASE(m_StateArray[i].m_pState);
+		_RELEASE(m_StateArray[i].m_pAlternateState);
 	}
 
 	m_StateArray.clear_not_free();
@@ -184,6 +186,7 @@ void dx10SamplerStateCache::SetMaxAnisotropy(u32 uiMaxAniso)
 		StateRecord& rec = m_StateArray[i];
 		StateDecs desc;
 
+		_RELEASE(rec.m_pAlternateState); // made for other settings
 		if (!rec.m_pState)
 			continue;
 
@@ -214,6 +217,8 @@ void dx10SamplerStateCache::SetMipLODBias(float uiMipLODBias)
         StateRecord& rec = m_StateArray[i];
         StateDecs desc;
 
+        _RELEASE(rec.m_pAlternateState); // made for other settings
+
         rec.m_pState->GetDesc(&desc);
 
         desc.MipLODBias = m_uiMipLODBias;
@@ -233,6 +238,8 @@ void dx10SamplerStateCache::SetMaxAnisotropyAndMipLODBias(u32 uiMaxAniso, float 
 	if (m_uiMaxAnisotropy == uiMaxAniso && m_uiMipLODBias == fMipLODBias)
 		return;
 
+	const u32 prevAniso = m_uiMaxAnisotropy;
+	const float prevBias = m_uiMipLODBias;
 	m_uiMaxAnisotropy = uiMaxAniso;
 	m_uiMipLODBias = fMipLODBias;
 
@@ -244,15 +251,28 @@ void dx10SamplerStateCache::SetMaxAnisotropyAndMipLODBias(u32 uiMaxAniso, float 
 		if (!rec.m_pState)
 			continue;
 
+		// Back to the settings before the last switch (the scene's bias and the rest of the frame's): reuse that state
+		if (rec.m_pAlternateState && rec.m_alternateAniso == uiMaxAniso && rec.m_alternateMipLODBias == fMipLODBias)
+		{
+			std::swap(rec.m_pState, rec.m_pAlternateState);
+			rec.m_alternateAniso = prevAniso;
+			rec.m_alternateMipLODBias = prevBias;
+			continue;
+		}
+
 		rec.m_pState->GetDesc(&desc);
 
 		desc.MaxAnisotropy = m_uiMaxAnisotropy;
 		desc.MipLODBias = m_uiMipLODBias;
 		dx10StateUtils::ValidateState(desc);
 
-		// This can cause fragmentation if called too often
-		rec.m_pState->Release();
-		CreateState(desc, &rec.m_pState);
+		IDeviceState* next = nullptr;
+		CreateState(desc, &next);
+		_RELEASE(rec.m_pAlternateState);
+		rec.m_pAlternateState = rec.m_pState;
+		rec.m_alternateAniso = prevAniso;
+		rec.m_alternateMipLODBias = prevBias;
+		rec.m_pState = next;
 	}
 }
 
