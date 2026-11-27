@@ -1,3 +1,78 @@
+# Changes in this fork (Tetracell/next-ray-engine)
+
+This fork branches from [Ozicom23/next-ray-engine](https://github.com/Ozicom23/next-ray-engine) at `d67044cf6`. Below are
+all the changes made since then, oldest first. Everything below the line further down is the original README, unedited.
+
+### Build
+
+- **Visual Studio 2026 compiler (v145)** (`a8ccb6b26`): braces one `case` in `SetParam` that declared a local variable
+  (error C2360), so the solution builds with the v145 toolset.
+
+### Upstream fixes and Lua exports picked ahead of the full merge (branch `upstream-script-exports`)
+
+Cherry-picked from [themrdemonized/xray-monolith](https://github.com/themrdemonized/xray-monolith). GAMMA scripts call these:
+
+- `f4a054688`: Lua get/set for the HUD fire bone and fire position (silencer).
+- `b7a8621f1`: `level.remove_hud_motion_cam_effectors`.
+- `f0447b360`: `npc:make_enemy_visible(enemy)`, which puts an enemy into an NPC's "seen" memory.
+- `02dccb744`: `level.set_rain_wetness`.
+- `978c98519`: fixes a crash, a double free of the `$level$` path when levels load in parallel.
+
+### Full merge of upstream xray-monolith (branch `monolith-merge`)
+
+- **`1d9a0cba8`:** merges `all-in-one-vs2022-wpo-mt` at `b58698d0a` (2026-11-22), about 650 upstream commits from 2026-01
+  to 2026-11. Highlights:
+  - scripted attachments, 3D inventory icons and inverse kinematics;
+  - spawn overlays and level packs;
+  - the shader bus;
+  - Lua callback priorities and many new exports;
+  - AI fixes and many stability fixes;
+  - RenderDoc integration (`rdoc_capture`).
+- **44 files conflicted, all resolved by hand.** The main decisions:
+  - **File system (`LocatorAPI`):** upstream's locking is the base, with neXt-Ray's parallel file index, prefetching and
+    level preloading put back on top. A plain merge would have nested two locks and frozen the game.
+  - **Lua callbacks (`axr_main.script`):** neXt-Ray's callback cache is renamed `callback_list` so it doesn't clash with
+    upstream's new `callback_order`.
+  - **Weapon-attached UI:** drawn where upstream draws it without an upscaler, and after DLSS/FSR (neXt-Ray's place) with one.
+  - **Shader cache:** uses upstream's new layout, so **the first start after updating recompiles every shader**.
+- **`669376de8`:** a DX12 build fix. The DX12 exe sends GPU markers through its own wrapper, because upstream's RenderDoc
+  marker path is DX11 only.
+- **The exes and `db/mods/00_modded_exes_gamedata.db0` must be updated together:** the merged scripts call the new engine
+  functions.
+
+### Upscaler (DLSS/FSR) fixes
+
+- **Night vision now covers detector and wrist-device screens** (`ba8b7eb89`):
+  - **The problem:** with an upscaler on, the UI drawn on items in your hands (detector screens, the WearableDevices watch
+    and Promin) was drawn after night vision, the gas mask and the fake scope. It showed on top of them, untinted.
+  - **The fix:** while one of those overlays is on, that UI is drawn before them. It is still drawn after the upscaler,
+    so it stays sharp.
+
+### Picked from [brodrigz/xray-monolith](https://github.com/brodrigz/xray-monolith) (branch `fork-upscaling-picks`)
+
+- **WearableDevices screen glass** (`bca467e59`, after `e92194607`): with an upscaler on, the glass on the Promin, Vektor
+  and Metro watch screens is drawn over the screen instead of under it.
+- **Motion vectors for moving rigid objects** (`bca467e59`, from `353e4bf48`): props, doors and dropped items get their
+  previous-frame position. Before, they reported motion as if they came from the world's origin, which caused smearing
+  and ghosting under DLSS/FSR and SSS TAA.
+- **Sampler states** (`c22db1f86`, after `777c5220d`): switching the upscaler's texture LOD bias at the start and end of the
+  scene, every frame, no longer rebuilds every sampler state.
+- **Memory** (`b1e6e7988`, from `6a93fc679`): a block that `realloc` shrank in place and then grew again could hand back
+  stale bytes where zeros were promised. That tail is now cleared.
+
+### Known issues
+
+- **Red dot / reflex sights show no reticle without a shader override.** Upstream's "Fix SSS Bloom" (`a07386981`) removed
+  the lens rendering errors, but not this.
+- **Night vision can flicker** between a soft, dark look and a bright, sharp one with DLSS/FSR on. Workaround:
+  `r4_upscaler_nvg_res 0`.
+
+---
+
+*Everything below this line is the original neXt-Ray README, unedited.*
+
+---
+
 <p align="center"><img src="docs/splash.png" width="500" alt="neXt-Ray x64 / DX12"></p>
 
 <p align="center"><a href="https://ko-fi.com/ozicom23"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi"></a></p>
