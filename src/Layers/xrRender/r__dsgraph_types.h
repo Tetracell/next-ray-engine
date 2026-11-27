@@ -274,6 +274,7 @@ namespace R_dsgraph
 		mapDSGraphItems<float, true> mapScopeHUDSorted;
 		mapDSGraphItems<float, false> mapScopeHUD;
 		mapDSGraphItems<float, true> mapPDALate; // the PDA screen held back for after the upscaler (upscale_pda_late)
+		mapDSGraphItems<float, true> mapHUDGlassLate; // WearableDevices screen glass, drawn over the late HUD UI
 		mapDSGraphItems<float, false> mapScopeCamAttached;
 		mapDSGraphItems<float, false> mapScopeCamAttachedSorted;
 #endif
@@ -364,6 +365,7 @@ namespace R_dsgraph
 				mapScopeHUD.clear_and_free();
 				mapScopeHUDSorted.clear_and_free();
 				mapPDALate.clear_and_free();
+				mapHUDGlassLate.clear_and_free();
 #endif
 			}
 			else
@@ -393,6 +395,7 @@ namespace R_dsgraph
 				mapScopeHUD.clear();
 				mapScopeHUDSorted.clear();
 				mapPDALate.clear();
+				mapHUDGlassLate.clear();
 #endif
 			}
 		}

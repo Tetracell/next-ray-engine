@@ -694,6 +694,7 @@ void CRenderTarget::phase_hud_ui_upscaled(bool item_ui, bool cam_ui)
 		RImplementation.GMBase.r_dsgraph_render_hud_ui();
 	if (cam_ui)
 		RImplementation.GMBase.r_dsgraph_render_cam_ui();
+	RImplementation.GMBase.r_dsgraph_render_HUDGlassLate(); // the screen glass over it
 
 	Device.dwRenderWidth = render_w;
 	Device.dwRenderHeight = render_h;

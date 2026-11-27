@@ -132,6 +132,7 @@ public:
 #if defined(USE_DX11)
 	void r_dsgraph_render_ScopeSorted();
 	void r_dsgraph_render_PDALate();
+	void r_dsgraph_render_HUDGlassLate();
 #endif
 	void r_dsgraph_render_cam_ui();
 	void r_dsgraph_render_water_ssr();

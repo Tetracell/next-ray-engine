@@ -48,6 +48,24 @@ extern int ps_r4_smap_order;
 extern int ps_r4_tree_instancing;
 namespace hiz { bool test_static(const Fbox& box, bool tree); }
 namespace sun_receivers { bool test_caster(const Fbox& box, u32 cascade); }
+
+#if defined(USE_DX11)
+// The screen glass of WearableDevices' Promin, Vektor and Metro watch (r_dsgraph_render_HUDGlassLate)
+static bool is_wearable_screen_glass(const ShaderElement* sh)
+{
+	if (!sh->passes.size() || !sh->passes[0]->T)
+		return false;
+	for (const auto& t : *sh->passes[0]->T)
+	{
+		if (!t.second)
+			continue;
+		const char* n = t.second->cName.c_str();
+		if (n && !strncmp(n, "wd\\", 3) && (strstr(n, "_screen_glass") || strstr(n, "_watch_glass")))
+			return true;
+	}
+	return false;
+}
+#endif
 #endif
 
 ICF bool R4FullDetailRejectStatic(dxRender_Visual* pVisual, bool normalPhase)
@@ -249,6 +267,13 @@ void CDSGraphManager::r_dsgraph_insert_dynamic(dxRender_Visual *pVisual, Fmatrix
 				sh->passes[0]->ps._get() && strstr(sh->passes[0]->ps->cName.c_str(), "pda_overlay"))
 			{
 				RGraph.mapPDALate.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
+				return;
+			}
+			// WearableDevices screen glass: with the upscaler on, the screens' UI (RenderActiveItemUI) draws after the
+			// upscaler, so glass drawn in the scene lay under it. Held back to draw over it (r_dsgraph_render_HUDGlassLate)
+			if (RImplementation.upscale_scene_active && !i_mask[CDSGraphManager::fl_cam] && is_wearable_screen_glass(sh))
+			{
+				RGraph.mapHUDGlassLate.emplace_back(distSQ, SSA, val_pObject, pVisual, xform, sh, i_mask[CDSGraphManager::fl_hud]);
 				return;
 			}
 #endif

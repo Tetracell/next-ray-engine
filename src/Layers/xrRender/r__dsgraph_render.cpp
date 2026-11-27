@@ -59,6 +59,59 @@ ICF float calcLOD(float ssa/*fDistSq*/, float R)
 }
 
 #ifdef USE_DX11
+// Previous-frame world matrix of dynamic visuals, by their xform pointer (from brodrigz/xray-monolith 353e4bf48). Only the
+// sky set the previous world matrix, so rigid dynamic meshes (props, items, doors) built m_wvp_prev with an identity world
+// and wrote motion vectors as if they came from the world's origin: smearing and ghosting under DLSS/FSR and SSS TAA.
+// Skinned meshes still set their own m_wvp_prev (CSkeletonX::_Render)
+namespace
+{
+struct PrevWorldXform
+{
+	Fmatrix prev;
+	Fmatrix last;
+	u32 frame;
+};
+xr_unordered_map<const Fmatrix*, PrevWorldXform> g_prev_world_xforms;
+
+void set_dynamic_world_prev(const Fmatrix* M)
+{
+	if (!RImplementation.o.ssfx_motionvectors)
+		return;
+	const size_t count = g_prev_world_xforms.size();
+	PrevWorldXform& X = g_prev_world_xforms[M];
+	if (g_prev_world_xforms.size() != count)
+	{
+		X.prev = *M;
+		X.frame = Device.dwFrame;
+	}
+	else if (X.frame != Device.dwFrame)
+	{
+		// Not drawn last frame: no usable history, so no object motion
+		X.prev = (X.frame + 1 == Device.dwFrame) ? X.last : *M;
+		X.frame = Device.dwFrame;
+	}
+	X.last = *M;
+	RCache.set_xform_world_prev(X.prev);
+}
+
+void prune_dynamic_world_prev()
+{
+	static u32 last_prune = 0;
+	if (Device.dwFrame - last_prune < 600)
+		return;
+	last_prune = Device.dwFrame;
+	for (auto it = g_prev_world_xforms.begin(); it != g_prev_world_xforms.end();)
+	{
+		if (Device.dwFrame - it->second.frame > 2)
+			it = g_prev_world_xforms.erase(it);
+		else
+			++it;
+	}
+}
+}
+#endif
+
+#ifdef USE_DX11
 #include "FTreeVisual.h"
 #include "dxRenderDeviceRender.h"
 #ifdef USE_DX11
@@ -244,6 +297,9 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		RCache.set_Element(item.pSE);
 		CCustomFOVInitializer projection(item.fov);
 		RCache.set_xform_world(*item.pMatrix);
+#ifdef USE_DX11
+		set_dynamic_world_prev(item.pMatrix);
+#endif
 		RImplementation.apply_object(item.pObject);
 		RImplementation.apply_lmaterial();
 		//if (item.b_hud_mode)
@@ -257,11 +313,19 @@ void CDSGraphManager::r_dsgraph_render_graph_sorted(R_dsgraph::mapDSGraphItems<T
 		graph.clear();
 
 	RCache.set_xform_world(Fidentity);
+#ifdef USE_DX11
+	RCache.set_xform_world_prev(Fidentity);
+#endif
 }
 
 void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _priority, bool _clear, bool static_geometry)
 {
 	RCache.set_xform_world(Fidentity);
+#ifdef USE_DX11
+	RCache.set_xform_world_prev(Fidentity);
+	if (!static_geometry)
+		prune_dynamic_world_prev();
+#endif
 
 	for (u32 iPass = 0; iPass < SHADER_PASSES_MAX; ++iPass)
 	{
@@ -445,6 +509,9 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 			if (!static_geometry)
 			{
 				RCache.set_xform_world(*item.pMatrix);
+#ifdef USE_DX11
+				set_dynamic_world_prev(item.pMatrix);
+#endif
 				RImplementation.apply_object(item.pObject);
 				RImplementation.apply_lmaterial();
 			}
@@ -489,6 +556,10 @@ void CDSGraphManager::r_dsgraph_render_graph(RenderQueueArray& queues, u32 _prio
 		if (_clear)
 			queue.clear();
 	}
+#ifdef USE_DX11
+	if (!static_geometry)
+		RCache.set_xform_world_prev(Fidentity);
+#endif
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -603,6 +674,17 @@ void CDSGraphManager::r_dsgraph_render_PDALate()
 	CHudInitializer initializer(true);
 	RImplementation.rmNear();
 	r_dsgraph_render_graph_sorted(RGraph.mapPDALate, true);
+	RImplementation.rmNormal();
+}
+
+// The WearableDevices screen glass held back with the HUD UI it covers (mapHUDGlassLate), as in r_dsgraph_render_sorted_hud
+void CDSGraphManager::r_dsgraph_render_HUDGlassLate()
+{
+	if (RGraph.mapHUDGlassLate.empty())
+		return;
+	CHudInitializer initializer(true);
+	RImplementation.rmNear();
+	r_dsgraph_render_graph_sorted(RGraph.mapHUDGlassLate, true);
 	RImplementation.rmNormal();
 }
 #endif

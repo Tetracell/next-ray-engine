@@ -108,7 +108,7 @@ void CRender::render_hud_ui_upscaled()
 	const bool item_ui = g_hud->RenderActiveItemUIQuery();
 	const bool cam_ui = g_hud->RenderCamAttachedUIQuery();
 	s_hud_ui_drawn = true;
-	if (!item_ui && !cam_ui)
+	if (!item_ui && !cam_ui && GMBase.RGraph.mapHUDGlassLate.empty())
 		return;
 	Target->phase_hud_ui_upscaled(item_ui, cam_ui);
 }
@@ -454,6 +454,12 @@ void CRender::Render()
 		{
 			Target->upscale_hud_ui_depth();
 			GMBase.r_dsgraph_render_cam_ui();
+		}
+		// WearableDevices screen glass held back from the scene's HUD (mapHUDGlassLate): over the UI it covers
+		if (!GMBase.RGraph.mapHUDGlassLate.empty())
+		{
+			Target->upscale_hud_ui_depth();
+			GMBase.r_dsgraph_render_HUDGlassLate();
 		}
 	}
 
