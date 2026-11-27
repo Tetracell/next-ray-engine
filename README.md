@@ -94,8 +94,6 @@ neXt-Ray before and never changed the setting, it may still say `r4_tex_stream 1
 - **Texture streaming crashes:** see [above](#texture-streaming-is-off-by-default); off by default.
 - **Red dot / reflex sights show no reticle without a shader override.** Upstream's "Fix SSS Bloom" (`a07386981`) removed
   the lens rendering errors, but not this.
-- **Night vision can flicker** between a soft, dark look and a bright, sharp one with DLSS/FSR on. Workaround:
-  `r4_upscaler_nvg_res 0`.
 
 ---
 
